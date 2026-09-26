@@ -291,6 +291,12 @@
   .install-s { font-size: 12.5px; color: var(--muted2); margin-top: 4px; line-height: 1.8; }
   .install-how { font-size: 12.5px; color: var(--text); background: var(--tint-card); border-radius: 10px; padding: 8px 10px; margin-top: 8px; line-height: 1.9; }
   .install-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .install-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .install-state { font-size: 12.5px; color: var(--muted2); }
+  .install-state.ok { color: #2E7D5B; font-weight: 600; }
+  .install-badge { font-size: 12px; padding: 5px 12px; border-radius: 12px; background: var(--bg); color: var(--muted2); border: 1px solid var(--border); }
+  .install-badge.ok { background: rgba(46,125,91,0.14); color: #2E7D5B; border-color: transparent; }
+  body.dark .install-state.ok, body.dark .install-badge.ok { color: #7FD3AE; }
   .ib { font-family: inherit; font-size: 12.5px; padding: 7px 14px; border-radius: 10px; border: 1px solid var(--border); background: transparent; color: var(--muted2); cursor: pointer; }
   .ib.main { background: #A63A3A; color: #fff; border-color: #A63A3A; font-weight: 700; }
 
@@ -350,6 +356,28 @@
   body.dark .nb-chip { color: var(--edit-text); }
   body.dark .nb-chip.warn { color: #E6C77E; }
 
+
+  .dup-overlay { position: fixed; inset: 0; z-index: 90; background: rgba(0,0,0,0.5); display: flex; align-items: flex-end; justify-content: center; padding: 0; }
+  .dup-box { background: var(--card); width: 100%; max-width: 420px; border-radius: 20px 20px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom, 0px)); max-height: 82vh; overflow-y: auto; }
+  .dup-title { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 12px; line-height: 1.7; }
+  .dup-list { background: var(--tint-card); border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; max-height: 220px; overflow-y: auto; }
+  .dup-item { font-size: 12.5px; color: var(--text); line-height: 2; overflow-wrap: anywhere; }
+  .dup-hint { font-size: 11.5px; color: var(--muted); line-height: 1.8; margin-bottom: 14px; }
+  .dup-yes { display: block; width: 100%; padding: 13px; border: none; border-radius: 12px; background: #A63A3A; color: #fff; font-family: inherit; font-size: 14.5px; font-weight: 700; cursor: pointer; }
+  .dup-no { display: block; width: 100%; padding: 12px; margin-top: 8px; border: none; border-radius: 12px; background: var(--pill-bg); color: var(--muted2); font-family: inherit; font-size: 14px; cursor: pointer; }
+
+
+  .snav-2row { flex-wrap: wrap; }
+  .snav-2row .nav-btn { flex: 1 1 18%; min-width: 60px; padding-inline: 2px; }
+  .snav-2row .nav-btn span { font-size: 10.5px; }
+  .nav-emoji { font-size: 21px; line-height: 1; }
+  .pf-sec { font-size: 13.5px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
+  .pf-group { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; background: var(--tint-card); }
+  .pf-grouphead { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px dashed var(--border); cursor: pointer; }
+  .pf-grouphead b { flex: 1; font-size: 13px; color: var(--text); }
+  .pf-grouphead span { font-size: 10.5px; color: var(--muted); }
+  .pf-item { display: flex; align-items: center; gap: 8px; padding: 5px 2px; font-size: 12.5px; color: var(--text); cursor: pointer; }
+
 </style>
 </head>
 <body>
@@ -380,7 +408,7 @@
 </script>
 
 <script>
-const API_URL = "https://script.google.com/macros/s/AKfycbxix7sIw8wEXli_WvOPZ1cxAfkxiThbkgISzCNW0-UeFcJ1APY5ynchEJM7cBYQvyrtiA/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbwwMygFTCTVBAt1aVzFWUReJLBxgUQldBcuVqBIIvLvIVLuHgKUgh3A1fBlof3mwgMgaA/exec";
 
 const SUBJECTS = ["لغة عربية", "لغة إنجليزية", "رياضيات", "علوم", "تربية إسلامية", "دراسات اجتماعية", "حاسب آلي", "تربية فنية", "تربية بدنية", "عام"];
 const EXAM_TYPES = ["المذاكرة الأولى", "المذاكرة الثانية", "الامتحان النهائي للفصل"];
@@ -753,13 +781,29 @@ function findNameDuplicates(list, nameField, newName) {
 }
 
 // تعرض تنبيهاً وترجع true إذا وافق المستخدم على المتابعة
-function confirmDuplicateName(duplicates, describeFn, label) {
-  if (duplicates.length === 0) return true;
-  const lines = duplicates.map(d => "• " + describeFn(d)).join("\n");
-  return confirm(
-    `⚠️ تنبيه: يوجد ${duplicates.length} ${label} بنفس الاسم مسجّل مسبقاً:\n\n${lines}\n\n` +
-    `المعرّف (ID) سيكون مختلفاً ولن يتكرر أبداً.\nهل تريد المتابعة والإضافة؟`
-  );
+// نافذة تأكيد مخصّصة (بدل confirm() الافتراضية) — أصعب تخطّيها بالغلط أثناء إدخال سريع،
+// لأن المتابعة تتطلب ضغط زر أحمر صريح، لا مجرد Enter أو ضغطة عرضية.
+function confirmDuplicateNameAsync(duplicates, describeFn, label) {
+  if (duplicates.length === 0) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const lines = duplicates.map((d) => `<div class="dup-item">• ${staffEsc(describeFn(d))}</div>`).join("");
+    const overlay = document.createElement("div");
+    overlay.className = "dup-overlay";
+    overlay.innerHTML = `
+      <div class="dup-box">
+        <div class="dup-title">⚠️ يوجد ${duplicates.length} ${staffEsc(label)} بنفس الاسم مسجّل مسبقاً</div>
+        <div class="dup-list">${lines}</div>
+        <div class="dup-hint">المعرّف (ID) سيكون مختلفاً ولن يتكرر أبداً. تأكد أن هذا شخص جديد فعلاً وليس تكراراً بالخطأ.</div>
+        <button type="button" class="dup-yes">نعم، متابعة رغم التكرار</button>
+        <button type="button" class="dup-no">إلغاء</button>
+      </div>`;
+    document.body.appendChild(overlay);
+    document.body.classList.add("sheet-open");
+    const done = (result) => { overlay.remove(); document.body.classList.remove("sheet-open"); resolve(result); };
+    overlay.querySelector(".dup-yes").addEventListener("click", () => done(true));
+    overlay.querySelector(".dup-no").addEventListener("click", () => done(false));
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) done(false); });
+  });
 }
 
 
@@ -897,6 +941,7 @@ function renderLogin(errorMsg) {
       <div class="school-name">مدرسة مسار للتميز</div>
       <div class="school-sub">بوابة المعلمين والإدارة</div>
     </div>
+    ${installBannerHtml()}
     <form id="loginForm">
       <label>اسم المستخدم</label>
       <div class="field"><input id="userInput" placeholder="مثال: T01A" /></div>
@@ -929,6 +974,7 @@ function renderLogin(errorMsg) {
       data._password = password;
       staffSession = data;
       staffLastFetch = Date.now();
+      hapticSuccess();
       if (remember) writeStaffCache(username, data);
       nextStaffCheer();
       teacherTab = "dashboard";
@@ -1202,7 +1248,7 @@ function renderAdminStudentsTab() {
         </div>
         <div class="form-field">
           <label>الصف</label>
-          <select id="newStudentClass" required>
+          <select id="newStudentClass" required onchange="autoFillFee(\'newStudentFee\', this.value)">
             <option value="">اختر الصف</option>
             ${CLASS_LEVELS_LIST.map(c => `<option value="${c}">${c}</option>`).join("")}
           </select>
@@ -1218,8 +1264,9 @@ function renderAdminStudentsTab() {
           ${parentPickerHtml("newStudentParent", "")}
         </div>
         <div class="form-field">
-          <label>الرسوم السنوية (اختياري)</label>
+          <label>الرسوم السنوية</label>
           <input id="newStudentFee" type="number" />
+          <div style="font-size:11px;color:var(--muted);margin-top:4px;">تُعبّأ تلقائياً حسب الصف، ويمكنك تعديلها لهذا الطالب فقط (منحة أو خصم مثلاً).</div>
         </div>
         <div class="form-field">
           <label>تاريخ الميلاد (اختياري)</label>
@@ -1387,7 +1434,7 @@ async function submitEditParent(e) {
   const newPhone = document.getElementById("epPhone").value.trim();
 
   const dups = findNameDuplicates(staffSession.parents, "Parent_Name", newName).filter(d => d.Parent_ID !== pid);
-  if (!confirmDuplicateName(dups, d => `${d.Parent_Name} — ${d.Parent_ID}`, "ولي أمر")) return;
+  if (!await confirmDuplicateNameAsync(dups, d => `${d.Parent_Name} — ${d.Parent_ID}`, "ولي أمر")) return;
 
   const btn = document.getElementById("editParentBtn");
   btn.disabled = true;
@@ -1433,7 +1480,7 @@ function renderEditStudentForm(s) {
       <div class="section-title">تعديل بيانات: ${nameWithAge(s.Student_Name, s.Birth_Date)}</div>
       <form id="editStudentForm" data-sid="${s.Student_ID}">
         <div class="form-field"><label>اسم الطالب</label><input id="editName" value="${s.Student_Name || ""}" required /></div>
-        <div class="form-field"><label>الصف</label><select id="editClass" required>${classOptionsEdit}</select></div>
+        <div class="form-field"><label>الصف</label><select id="editClass" required onchange="autoFillFee(\'editFee\', this.value)">${classOptionsEdit}</select></div>
         <div class="form-field">
           <label>الشعبة</label>
           <select id="editSection">
@@ -1445,7 +1492,7 @@ function renderEditStudentForm(s) {
           ${parentPickerHtml("editParent", s.Parent_ID)}
           <div style="font-size:11px;color:var(--muted);margin-top:5px;">غيّر هذا الحقل فقط إذا كان الوالد المسجّل خطأً</div>
         </div>
-        <div class="form-field"><label>الرسوم السنوية</label><input id="editFee" type="number" value="${String(s.Tuition_Fee || "").replace(/[^0-9.]/g, "")}" /></div>
+        <div class="form-field"><label>الرسوم السنوية</label><input id="editFee" type="number" value="${String(s.Tuition_Fee || "").replace(/[^0-9.]/g, "")}" /><div style="font-size:11px;color:var(--muted);margin-top:4px;">تغيير الصف أعلاه يقترح رسماً جديداً تلقائياً، ويمكنك تعديله.</div></div>
         <div class="form-field"><label>تاريخ الميلاد (اختياري)</label><input id="editBirthDate" type="date" value="${s.Birth_Date || ""}" /></div>
         <div class="form-field"><label>اسم الأم (اختياري)</label><input id="editMotherName" value="${s.Mother_Name || ""}" placeholder="لم يتم إدخال معلومات بعد" /></div>
         <div class="form-field"><label>ملاحظات صحية / أمراض (اختياري)</label><textarea id="editIllness" rows="2" placeholder="لم يتم إدخال معلومات بعد">${s.Illness || ""}</textarea></div>
@@ -1480,7 +1527,7 @@ async function submitAddParent(e) {
 
   // تنبيه (وليس منع) عند تكرار الاسم
   const dups = findNameDuplicates(staffSession.parents, "Parent_Name", parentName);
-  if (!confirmDuplicateName(dups, d => `${d.Parent_Name} — ${d.Parent_ID}`, "ولي أمر")) {
+  if (!await confirmDuplicateNameAsync(dups, d => `${d.Parent_Name} — ${d.Parent_ID}`, "ولي أمر")) {
     renderDashboard();
     return;
   }
@@ -1504,7 +1551,7 @@ async function submitAddParent(e) {
     if (!data.ok) {
       addParentMsg = `<div class="form-msg err">${data.error}</div>`;
     } else {
-      addParentMsg = `<div class="form-msg ok">تمت إضافة ولي الأمر برقم ${data.newParentId} ✓ اختره الآن من قائمة "ولي الأمر" بالأسفل</div>`;
+      hapticSuccess(); addParentMsg = `<div class="form-msg ok">تمت إضافة ولي الأمر برقم ${data.newParentId} ✓ اختره الآن من قائمة "ولي الأمر" بالأسفل</div>`;
       staffSession.parents.push({ Parent_ID: data.newParentId, Parent_Name: payload.Parent_Name });
     }
   } catch (err) {
@@ -1521,7 +1568,7 @@ async function submitEditStudent(e) {
   // تنبيه عند التعديل لاسم مطابق لطالب آخر (باستثناء الطالب نفسه)
   const dups = findNameDuplicates(staffSession.students, "Student_Name", newName)
     .filter(d => d.Student_ID !== sid);
-  if (!confirmDuplicateName(
+  if (!await confirmDuplicateNameAsync(
         dups,
         d => `${d.Student_Name} — ${d.Student_ID} · ${d.Class_Level || ""}${d.Section ? " شعبة " + d.Section : ""}`,
         "طالب")) {
@@ -1585,7 +1632,7 @@ async function submitAddStudent(e) {
 
   // تنبيه (وليس منع) عند تكرار الاسم — قد يكون طالباً آخر في صف مختلف
   const dups = findNameDuplicates(staffSession.students, "Student_Name", studentName);
-  if (!confirmDuplicateName(
+  if (!await confirmDuplicateNameAsync(
         dups,
         d => `${d.Student_Name} — ${d.Student_ID} · ${d.Class_Level || ""}${d.Section ? " شعبة " + d.Section : ""} · ولي الأمر: ${d.Parent_Name || "-"}`,
         "طالب")) {
@@ -1622,7 +1669,7 @@ async function submitAddStudent(e) {
     if (!data.ok) {
       addStudentMsg = `<div class="form-msg err">${data.error}</div>`;
     } else {
-      addStudentMsg = `<div class="form-msg ok">تمت الإضافة برقم ${data.newStudentId} ✓</div>`;
+      hapticSuccess(); addStudentMsg = `<div class="form-msg ok">تمت الإضافة برقم ${data.newStudentId} ✓</div>`;
       staffSession.students.push({
         Student_ID: data.newStudentId,
         Student_Name: payload.Student_Name,
@@ -1909,14 +1956,9 @@ function renderAdminPaymentsTab() {
     </div>
   `;
 
-  // الحساب يعتمد على الدفعات الفعّالة فقط (الملغاة لا تُحتسب)
-  const activePayments = parentPayments.filter(p => String(p.Status || "Active").trim() !== "Void");
-  let totalRequired = 0, remaining = 0, totalPaid = 0;
-  if (parentPayments.length > 0) {
-    totalRequired = parseMoney(parentPayments[parentPayments.length - 1].Total_Required);
-    totalPaid = activePayments.reduce((sum, p) => sum + parseMoney(p.Amount), 0);
-    remaining = Math.max(0, totalRequired - totalPaid);
-  }
+  // الإجمالي والمدفوع والمتبقي محسوبون دائماً من رسوم الأبناء الفعّالين، وليسوا رقماً مُدخلاً يدوياً
+  const finance = financeOf(selectedPaymentParentId);
+  const totalRequired = finance.required, totalPaid = finance.paid, remaining = finance.remaining;
 
   html += `
     <div class="parent-summary">
@@ -1946,9 +1988,6 @@ function renderAdminPaymentsTab() {
             <option>بطاقة ائتمان</option>
           </select>
         </div>
-        ${parentPayments.length === 0 ? `
-        <div class="form-field"><label>الإجمالي المطلوب سنوياً (أول مرة فقط)</label><input id="paymentTotalRequired" type="number" min="1" required /></div>
-        ` : ""}
         <div class="form-field"><label>ملاحظات (اختياري)</label><input id="paymentNotes" /></div>
         <button type="submit" class="btn-save" id="addPaymentBtn">حفظ الدفعة</button>
         ${addPaymentMsg}
@@ -2016,7 +2055,6 @@ function renderPaymentEditForm(p) {
           ${["نقدي","تحويل بنكي","بطاقة ائتمان"].map(m => `<option ${String(p.Payment_Method||"").trim() === m ? "selected" : ""}>${m}</option>`).join("")}
         </select>
       </div>
-      <div class="form-field"><label>الإجمالي المطلوب سنوياً</label><input id="epTotal" type="number" min="0" value="${parseMoney(p.Total_Required)}" /></div>
       <div class="form-field"><label>ملاحظات</label><input id="epNotes" value="${p.Notes || ""}" /></div>
       <div class="form-field"><label>سبب التعديل (إجباري)</label><input id="epReason" placeholder="مثال: خطأ في إدخال المبلغ" required /></div>
       <button class="btn-save" onclick="submitEditPayment('${p.Payment_ID}')">حفظ التعديل</button>
@@ -2041,7 +2079,6 @@ async function submitEditPayment(paymentId) {
     Amount: document.getElementById("epAmount").value,
     Payment_Date: document.getElementById("epDate").value,
     Payment_Method: document.getElementById("epMethod").value,
-    Total_Required: document.getElementById("epTotal").value,
     Notes: document.getElementById("epNotes").value.trim(),
     Edit_Reason: reason
   };
@@ -2114,8 +2151,6 @@ async function submitAddPayment(e) {
   btn.disabled = true;
   btn.textContent = "جارِ الحفظ...";
 
-  const totalReqInput = document.getElementById("paymentTotalRequired");
-
   const payload = {
     action: "addPayment",
     adminUsername: staffSession.username,
@@ -2125,17 +2160,14 @@ async function submitAddPayment(e) {
     Payment_Date: document.getElementById("paymentDate").value,
     Payment_Method: document.getElementById("paymentMethod").value,
     Notes: document.getElementById("paymentNotes").value.trim(),
-    Total_Required: totalReqInput ? totalReqInput.value : undefined
   };
 
   try {
     const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(payload) });
     const data = await res.json();
     if (data.ok) {
-      addPaymentMsg = `<div class="form-msg ok">تم حفظ الدفعة ✓ المتبقي الآن: $${data.newRemainingBalance.toLocaleString()}</div>`;
+      hapticSuccess(); addPaymentMsg = `<div class="form-msg ok">تم حفظ الدفعة ✓ المتبقي الآن: $${data.newRemainingBalance.toLocaleString()}</div>`;
       const parent = (staffSession.parents || []).find(p => p.Parent_ID === selectedPaymentParentId);
-      const parentPayments = (staffSession.payments || []).filter(p => p.Parent_ID === selectedPaymentParentId);
-      const totalRequired = payload.Total_Required || (parentPayments.length ? parseMoney(parentPayments[parentPayments.length - 1].Total_Required) : 0);
       staffSession.payments.push({
         Parent_ID: selectedPaymentParentId,
         Parent_Name: parent ? parent.Parent_Name : "",
@@ -2143,8 +2175,7 @@ async function submitAddPayment(e) {
         Payment_Date: payload.Payment_Date,
         Payment_Method: payload.Payment_Method,
         Notes: payload.Notes,
-        Total_Required: totalRequired,
-        Remaining_Balance: data.newRemainingBalance
+        Status: "Active"
       });
     } else {
       addPaymentMsg = `<div class="form-msg err">${data.error}</div>`;
@@ -2319,7 +2350,7 @@ async function submitInlineAssignments(username) {
     const data = await res.json();
     if (data.ok) {
       await refreshSession();
-      inlineTAMsg = `<div class="form-msg ok">تمت إضافة ${data.created} ${data.created === 1 ? "إسناد" : "إسنادات"} ✓${data.skipped && data.skipped.length ? `<br><small>تم تخطّي المكرر: ${data.skipped.map(staffEsc).join("، ")}</small>` : ""}${data.warnings && data.warnings.length ? `<br><small>⚠️ ${data.warnings.map(staffEsc).join(" — ")}</small>` : ""}</div>`;
+      hapticSuccess(); inlineTAMsg = `<div class="form-msg ok">تمت إضافة ${data.created} ${data.created === 1 ? "إسناد" : "إسنادات"} ✓${data.skipped && data.skipped.length ? `<br><small>تم تخطّي المكرر: ${data.skipped.map(staffEsc).join("، ")}</small>` : ""}${data.warnings && data.warnings.length ? `<br><small>⚠️ ${data.warnings.map(staffEsc).join(" — ")}</small>` : ""}</div>`;
     } else { inlineTAMsg = `<div class="form-msg err">${staffEsc(data.error || "حدث خطأ")}</div>`; }
   } catch (err) { inlineTAMsg = `<div class="form-msg err">تعذر الاتصال بالخادم</div>`; }
   renderDashboard();
@@ -2432,6 +2463,7 @@ async function submitBulkGrades() {
     if (data.ok) {
       await refreshSession();
       const sk = data.skipped || [];
+      if (data.saved > 0) hapticSuccess();
       bulkGradeMsg = data.saved > 0
         ? `<div class="form-msg ok">تم حفظ ${data.saved} ${data.saved === 1 ? "علامة" : "علامات"} ✓${sk.length ? `<br><small>لم تُحفظ: ${sk.map(x => staffEsc(x.name) + " (" + staffEsc(x.reason) + ")").join("، ")}</small>` : ""}</div>`
         : `<div class="form-msg err">لم تُحفظ أي علامة.${sk.length ? `<br><small>${sk.map(x => staffEsc(x.name) + " (" + staffEsc(x.reason) + ")").join("، ")}</small>` : ""}</div>`;
@@ -2504,7 +2536,7 @@ function renderAdminTeachersTab() {
             <div class="form-field"><label>اسم المعلم</label><input id="editTeacherName" value="${t.Name || ""}" required /></div>
             <div class="form-field"><label>الهاتف</label><input id="editTeacherPhone" value="${t.Phone || ""}" /></div>
             <div class="form-field"><label>كلمة السر (اتركها فارغة لعدم التغيير)</label><input id="editTeacherPassword" placeholder="••••" /></div>
-            <div style="font-size:11.5px;color:var(--muted);margin:6px 0 2px;">لتغيير الصف أو الشعبة أو المادة: استخدم تبويب "توزيع المواد" — هذا المكان الوحيد لضمان عدم تضارب البيانات.</div>
+            <div style="font-size:11.5px;color:var(--muted);margin:6px 0 2px;">لتغيير الصف أو الشعبة أو المادة: أغلق التعديل واضغط زر «🧩 المواد» تحت اسم المعلم بالأسفل.</div>
             <button type="submit" class="btn-save" id="editTeacherBtn">حفظ التعديلات</button>
             <button type="button" class="status-pill" style="width:100%;margin-top:8px;background:var(--pill-bg);color:var(--muted2);" onclick="editingTeacherUser=null;renderDashboard();">إلغاء</button>
             <div id="editTeacherMsg"></div>
@@ -2561,7 +2593,7 @@ async function submitAddTeacher(e) {
 
   // تنبيه (وليس منع) عند تكرار الاسم — قد يكون معلماً آخر لصف مختلف
   const dups = findNameDuplicates(staffSession.teachers, "Name", tName);
-  if (!confirmDuplicateName(
+  if (!await confirmDuplicateNameAsync(
         dups,
         d => `${d.Name} — ${d.Username} · ${describeTeacherScope(d.Username)}`,
         "معلم")) {
@@ -2608,7 +2640,7 @@ async function submitAddTeacher(e) {
         if (asg && asg.error) extra = `<br><small>⚠️ تعذّر إسناد المواد: ${staffEsc(asg.error)}</small>`;
         staffSession.teachers.push({ ...payload, Role: "Teacher" });
       }
-      addTeacherMsg = `<div class="form-msg ok">تمت إضافة المعلم ✓${extra}${tPhone ? credentialsWhatsappButtonHtml("teacher") : ""}</div>`;
+      hapticSuccess(); addTeacherMsg = `<div class="form-msg ok">تمت إضافة المعلم ✓${extra}${tPhone ? credentialsWhatsappButtonHtml("teacher") : ""}</div>`;
     } else {
       addTeacherMsg = `<div class="form-msg err">${data.error}</div>`;
     }
@@ -2625,7 +2657,7 @@ async function submitEditTeacher(e) {
 
   const dups = findNameDuplicates(staffSession.teachers, "Name", newName)
     .filter(d => d.Username !== username);
-  if (!confirmDuplicateName(
+  if (!await confirmDuplicateNameAsync(
         dups,
         d => `${d.Name} — ${d.Username} · ${describeTeacherScope(d.Username)}`,
         "معلم")) {
@@ -2760,7 +2792,7 @@ async function submitAddSupervisor(e) {
   const supName = document.getElementById("newSupName").value.trim();
 
   const dups = findNameDuplicates(staffSession.supervisors, "Supervisor_Name", supName);
-  if (!confirmDuplicateName(
+  if (!await confirmDuplicateNameAsync(
         dups,
         d => `${d.Supervisor_Name} — ${d.Supervisor_ID} · ${d.Route_Area || "بدون منطقة"}`,
         "مشرف/ة باص")) {
@@ -2786,7 +2818,7 @@ async function submitAddSupervisor(e) {
     const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(payload) });
     const data = await res.json();
     if (data.ok) {
-      addSupervisorMsg = `<div class="form-msg ok">تمت الإضافة ✓</div>`;
+      hapticSuccess(); addSupervisorMsg = `<div class="form-msg ok">تمت الإضافة ✓</div>`;
       staffSession.supervisors.push({ ...payload, Supervisor_ID: data.newSupervisorId });
     } else {
       addSupervisorMsg = `<div class="form-msg err">${data.error}</div>`;
@@ -2802,7 +2834,7 @@ async function saveSupervisor(supervisorId) {
 
   const dups = findNameDuplicates(staffSession.supervisors, "Supervisor_Name", newName)
     .filter(d => d.Supervisor_ID !== supervisorId);
-  if (!confirmDuplicateName(
+  if (!await confirmDuplicateNameAsync(
         dups,
         d => `${d.Supervisor_Name} — ${d.Supervisor_ID} · ${d.Route_Area || "بدون منطقة"}`,
         "مشرف/ة باص")) {
@@ -3112,7 +3144,7 @@ async function submitAddHoliday(e) {
     const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(payload) });
     const data = await res.json();
     if (data.ok) {
-      addHolidayMsg = `<div class="form-msg ok">تمت إضافة العطلة ✓</div>`;
+      hapticSuccess(); addHolidayMsg = `<div class="form-msg ok">تمت إضافة العطلة ✓</div>`;
       if (!staffSession.holidays) staffSession.holidays = [];
       staffSession.holidays.push({ Holiday_ID: data.newHolidayId, Date: payload.Date, Holiday_Name: payload.Holiday_Name });
       const d = new Date(payload.Date);
@@ -3599,7 +3631,7 @@ async function submitAttendance() {
     const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(payload) });
     const data = await res.json();
     if (data.ok) {
-      attendanceMsg = `<div class="form-msg ok">تم حفظ حضور ${data.updated + data.created} طالب ✓</div>`;
+      hapticSuccess(); attendanceMsg = `<div class="form-msg ok">تم حفظ حضور ${data.updated + data.created} طالب ✓</div>`;
       records.forEach(rec => {
         const idx = (staffSession.attendance || []).findIndex(
           a => String(a.Student_ID) === rec.Student_ID && String(a.Date) === attendanceDate
@@ -3762,7 +3794,7 @@ async function submitBehaviorNote(e) {
     const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(payload) });
     const data = await res.json();
     if (data.ok) {
-      behaviorMsg = `<div class="form-msg ok">تم حفظ الملاحظة ✓</div>`;
+      hapticSuccess(); behaviorMsg = `<div class="form-msg ok">تم حفظ الملاحظة ✓</div>`;
       const student = (staffSession.roster || []).find(s => s.Student_ID === payload.Student_ID);
       if (!staffSession.behaviorNotes) staffSession.behaviorNotes = [];
       staffSession.behaviorNotes.push({
@@ -3868,7 +3900,7 @@ async function submitGrade(e) {
     const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(payload) });
     const data = await res.json();
     if (data.ok) {
-      gradeMsg = `<div class="form-msg ok">تم حفظ العلامة ✓</div>`;
+      hapticSuccess(); gradeMsg = `<div class="form-msg ok">تم حفظ العلامة ✓</div>`;
       const student = (staffSession.roster || []).find(s => s.Student_ID === payload.Student_ID);
       if (!staffSession.grades) staffSession.grades = [];
       staffSession.grades.push({
@@ -3981,7 +4013,7 @@ async function submitAssignment(e) {
     const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(payload) });
     const data = await res.json();
     if (data.ok) {
-      assignmentMsg = `<div class="form-msg ok">تم حفظ الواجب ✓</div>`;
+      hapticSuccess(); assignmentMsg = `<div class="form-msg ok">تم حفظ الواجب ✓</div>`;
       if (!staffSession.assignments) staffSession.assignments = [];
       staffSession.assignments.push({
         Assignment_ID: data.newAssignmentId,
@@ -4009,13 +4041,212 @@ async function submitAssignment(e) {
 // تنظيم قوائم المدير في مجموعات (بدل 12 زر بصف واحد)
 // ---------------------------------------------------------------------------
 
+// =====================================================================
+// ⚙️ ميزات الصفحة (Owner فقط): إخفاء/إظهار أي قائمة عن المدير والمعلمين — تجميلي بالواجهة فقط،
+// عدا مفتاح OneSignal السرّي المحمي من الخادم دائماً بغض النظر عن هذه الإعدادات.
+// =====================================================================
+
+// كل تبويبات الإدارة القابلة للإخفاء، مجمّعة كما تُعرض بلوحة "ميزات الصفحة" (المجموعة ونظرة عامة تبقى ثابتة دائماً)
+const ADMIN_HIDEABLE_GROUPS = [
+  { id: "students", label: "👪 أولياء الأمور والطلاب", tabs: [
+      { id: "parents", label: "أولياء الأمور" }, { id: "students", label: "الطلاب" },
+      { id: "roster", label: "قوائم الصفوف" }, { id: "duplicates", label: "التكرارات" } ] },
+  { id: "money", label: "💰 المالية", tabs: [
+      { id: "payments", label: "الدفعات" }, { id: "financeReport", label: "التقارير المالية" } ] },
+  { id: "academic", label: "🎓 الأكاديمي", tabs: [
+      { id: "grades", label: "العلامات" }, { id: "ranking", label: "الترتيب" },
+      { id: "behavior", label: "السلوك" }, { id: "assignments", label: "الواجبات" } ] },
+  { id: "attend", label: "📅 الحضور", tabs: [
+      { id: "attendance", label: "تسجيل الحضور" }, { id: "attendanceSearch", label: "سجل الحضور" },
+      { id: "absenceReport", label: "تقرير الغياب" } ] },
+  { id: "staff", label: "🧑‍🏫 الطاقم", tabs: [
+      { id: "teachers", label: "المعلمون" }, { id: "teacherAssign", label: "توزيع المواد" },
+      { id: "bus", label: "الباص" }, { id: "adminAccounts", label: "حسابات الإدارة" } ] },
+  { id: "school", label: "🏛️ المدرسة", tabs: [
+      { id: "announcements", label: "الإعلانات" }, { id: "exams", label: "جداول الامتحانات" },
+      { id: "holidays", label: "تقويم العطل" }, { id: "settings", label: "الإعدادات" } ] },
+  { id: "logs", label: "🕓 السجلات", tabs: [
+      { id: "loginLog", label: "سجل الدخول" }, { id: "changeLog", label: "سجل التغييرات" } ] },
+];
+const TEACHER_HIDEABLE_TABS = [
+  { id: "attendance", label: "تسجيل الحضور" }, { id: "grades", label: "العلامات" },
+  { id: "assignments", label: "الواجبات" }, { id: "roster", label: "طلابي" },
+  { id: "attendanceSearch", label: "سجل الحضور" }, { id: "behavior", label: "السلوك" },
+  { id: "announcements", label: "الإعلانات" }, { id: "ranking", label: "الترتيب" },
+];
+
+function parseHiddenIds(settingKey) {
+  return new Set(getSettingValue(settingKey).split(",").map((x) => x.trim()).filter(Boolean));
+}
+function getHiddenAdminTabs() { return parseHiddenIds("Hidden_Admin_Tabs"); }
+function getHiddenTeacherTabs() { return parseHiddenIds("Hidden_Teacher_Tabs"); }
+
+// المجموعة ظاهرة إن بقي فيها تبويب واحد غير مخفي على الأقل (أو كانت "الرئيسية" الثابتة)
+function isAdminGroupVisible(groupId, hidden) {
+  if (groupId === "dashboard" || groupId === "pageFeatures") return true;
+  const grp = ADMIN_GROUPS.find((g) => g.id === groupId);
+  return !!grp && grp.tabs.some((t) => !hidden.has(t.id));
+}
+
+let pageFeaturesMsg = "";
+async function submitPageFeatures(kind) {
+  const listSel = kind === "admin" ? "#adminHideList input:checked" : "#teacherHideList input:checked";
+  const hiddenIds = Array.from(document.querySelectorAll(listSel)).map((cb) => cb.value);
+  const key = kind === "admin" ? "Hidden_Admin_Tabs" : "Hidden_Teacher_Tabs";
+  const btn = document.getElementById(kind === "admin" ? "saveAdminHideBtn" : "saveTeacherHideBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "جارِ الحفظ..."; }
+  try {
+    const value = hiddenIds.join(",");
+    const res = await fetch(API_URL, { method: "POST", body: JSON.stringify({
+      action: "updateSetting", adminUsername: staffSession.username, adminPassword: staffSession._password, Key: key, Value: value }) });
+    const data = await res.json();
+    if (data.ok) {
+      hapticSuccess();
+      if (!staffSession.settings) staffSession.settings = [];
+      const row = staffSession.settings.find((r) => r.Key === key);
+      if (row) row.Value = value; else staffSession.settings.push({ Key: key, Value: value });
+      pageFeaturesMsg = `<div class="form-msg ok">تم الحفظ ✓</div>`;
+    } else {
+      pageFeaturesMsg = `<div class="form-msg err">${data.error}</div>`;
+    }
+  } catch (err) {
+    pageFeaturesMsg = `<div class="form-msg err">تعذر الاتصال بالخادم</div>`;
+  }
+  renderDashboard();
+}
+function toggleHideGroupAll(groupBoxId, checked) {
+  document.querySelectorAll(`#${groupBoxId} input[type="checkbox"]`).forEach((cb) => { cb.checked = checked; });
+}
+
+function renderPageFeaturesTab() {
+  if (!isOwner()) return emptyState("🔒", "هذا القسم خاص بمطوّر الصفحة فقط", "");
+  const hiddenA = getHiddenAdminTabs(), hiddenT = getHiddenTeacherTabs();
+
+  const adminHtml = ADMIN_HIDEABLE_GROUPS.map((g) => {
+    const boxId = "hg_" + g.id;
+    const allChecked = g.tabs.every((t) => hiddenA.has(t.id));
+    return `
+      <div class="pf-group" id="${boxId}">
+        <label class="pf-grouphead">
+          <input type="checkbox" onchange="toggleHideGroupAll('${boxId}', this.checked)" ${allChecked ? "checked" : ""} />
+          <b>${g.label}</b><span>إخفاء المجموعة كاملة</span>
+        </label>
+        ${g.tabs.map((t) => `
+          <label class="pf-item"><input type="checkbox" value="${t.id}" ${hiddenA.has(t.id) ? "checked" : ""} /><span>${t.label}</span></label>
+        `).join("")}
+      </div>`;
+  }).join("");
+
+  const teacherHtml = `
+    <div class="pf-group" id="hg_teacher">
+      ${TEACHER_HIDEABLE_TABS.map((t) => `
+        <label class="pf-item"><input type="checkbox" value="${t.id}" ${hiddenT.has(t.id) ? "checked" : ""} /><span>${t.label}</span></label>
+      `).join("")}
+    </div>`;
+
+  return `
+    <div class="form-card">
+      <div class="section-title">⚙️ ميزات الصفحة</div>
+      <div style="font-size:11.5px;color:var(--muted);margin-bottom:14px;line-height:1.9;">
+        اختر ما تريد إخفاءه عن المدير والمعلمين. هذا الإخفاء تجميلي بالواجهة فقط، ولا يمسّ أي بيانات محفوظة.
+        «الرئيسية» تبقى ظاهرة دائماً لكل الحسابات. أنت وحدك (كمطوّر) تستمر برؤية كل شيء دوماً.
+      </div>
+      <div class="pf-sec">👨‍💼 قوائم المدير</div>
+      <div id="adminHideList">${adminHtml}</div>
+      <button type="button" class="btn-save" id="saveAdminHideBtn" onclick="submitPageFeatures('admin')">حفظ قوائم المدير</button>
+      <div class="pf-sec" style="margin-top:22px;">👩‍🏫 قوائم المعلم</div>
+      <div id="teacherHideList">${teacherHtml}</div>
+      <button type="button" class="btn-save" id="saveTeacherHideBtn" onclick="submitPageFeatures('teacher')">حفظ قوائم المعلم</button>
+      ${pageFeaturesMsg}
+    </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// التنقل بدورين: كل التبويبات المسموحة تظهر مباشرة (بدون قائمة "المزيد")، مرتّبة حسب كثرة الاستخدام
+// ---------------------------------------------------------------------------
+const ADMIN_NAV_ORDER = [
+  { id: "dashboard", label: "الرئيسية", icon: "home" },
+  { id: "attend", label: "الحضور", icon: "attend" },
+  { id: "students", label: "الطلاب", icon: "users" },
+  { id: "money", label: "المالية", icon: "wallet" },
+  { id: "academic", label: "الأكاديمي", icon: "grades" },
+  { id: "staff", label: "الطاقم", icon: "teach" },
+  { id: "school", label: "المدرسة", icon: "school" },
+  { id: "logs", label: "السجلات", icon: "logs" },
+];
+const TEACHER_NAV_ORDER = [
+  { id: "dashboard", label: "الرئيسية", icon: "home" },
+  { id: "attendance", label: "الحضور", icon: "attend" },
+  { id: "grades", label: "العلامات", icon: "grades" },
+  { id: "assignments", label: "الواجبات", icon: "book" },
+  { id: "roster", label: "طلابي", icon: "users" },
+  { id: "attendanceSearch", label: "سجل الحضور", icon: "search" },
+  { id: "behavior", label: "السلوك", icon: "note" },
+  { id: "announcements", label: "الإعلانات", icon: "bell" },
+  { id: "ranking", label: "الترتيب", icon: "trophy" },
+];
+
+function iconFor(name) { return NAV_ICONS[name] || ""; }
+
+function renderBottomNav() {
+  let items, activeId;
+  if (isAdmin()) {
+    const hidden = isOwner() ? new Set() : getHiddenAdminTabs();
+    items = ADMIN_NAV_ORDER.filter((x) => isAdminGroupVisible(x.id, hidden));
+    activeId = adminGroup;
+  } else {
+    const hidden = isOwner() ? new Set() : getHiddenTeacherTabs();
+    items = TEACHER_NAV_ORDER.filter((x) => x.id === "dashboard" || !hidden.has(x.id));
+    activeId = teacherTab;
+  }
+  let html = items.map((x) => navBtnHtml(x.id, x.label, x.icon, x.id === activeId)).join("");
+  if (isOwner()) html += navBtnHtml("pageFeatures", "ميزات الصفحة", "gear", adminGroup === "pageFeatures");
+  return `<nav class="snav snav-2row" aria-label="التنقل الرئيسي">${html}</nav>`;
+}
+function navBtnHtml(id, label, icon, active) {
+  return `<button type="button" class="nav-btn ${active ? "active" : ""}" data-nav="${id}" onclick="navSelect('${id}')">${iconFor(icon)}<span>${label}</span></button>`;
+}
+function navSelect(key) {
+  if (isAdmin()) selectAdminGroup(key);
+  else { teacherTab = key; if (key === "dashboard") nextStaffCheer(); renderDashboard(); }
+  window.scrollTo(0, 0);
+}
+
+// ---------------------------------------------------------------------------
+// 🔧 إعدادات العرض: نافذة مستقلة تُفتح من أيقونة بالترويسة (منفصلة تماماً عن ⚙️ ميزات الصفحة)
+// ---------------------------------------------------------------------------
+function renderSettingsSheet() {
+  const seg = (kind, items, cur, fn) => `<div class="seg">${items.map(([k, lab]) => `<button type="button" class="seg-b ${k === cur ? "on" : ""}" data-kind="${kind}" data-val="${k}" onclick="${fn}('${k}')">${lab}</button>`).join("")}</div>`;
+  return `
+    <div class="sheet" id="settingsSheet" role="dialog" aria-modal="true" aria-label="إعدادات العرض">
+      <div class="sheet-back" onclick="toggleSettingsSheet(false)"></div>
+      <div class="sheet-panel">
+        <div class="sheet-grip"></div>
+        <div class="sheet-title">🔧 إعدادات العرض</div>
+        ${staffInstallStatusRowHtml()}
+        <div class="set-row"><div class="set-lab">المظهر</div>${seg("theme", [["auto", "تلقائي"], ["light", "فاتح"], ["dark", "ليلي"]], getStaffThemePref(), "setStaffThemePref")}</div>
+        <div class="set-row"><div class="set-lab">حجم الخط</div>${seg("font", [["n", "عادي"], ["l", "كبير"], ["xl", "أكبر"]], getStaffFontPref(), "setStaffFontPref")}</div>
+        <div class="set-hint">«تلقائي» يتبع إعداد الوضع الليلي في جوالك.</div>
+        <button type="button" class="sheet-close" onclick="toggleSettingsSheet(false)">إغلاق</button>
+      </div>
+    </div>`;
+}
+function toggleSettingsSheet(open) {
+  const el = document.getElementById("settingsSheet");
+  if (!el) return;
+  el.classList.toggle("open", !!open);
+  document.body.classList.toggle("sheet-open", !!open || gsOpen);
+  if (open) { const b = el.querySelector(".seg-b"); if (b) setTimeout(() => b.focus({ preventScroll: true }), 50); }
+}
+
 const ADMIN_GROUPS = [
   { id: "dashboard", label: "🏠 الرئيسية", tabs: [
       { id: "dashboard", label: "نظرة عامة" } ] },
   { id: "students", label: "أولياء الأمور والطلاب", tabs: [
       { id: "parents",          label: "أولياء الأمور" },
       { id: "students",         label: "الطلاب" },
-      { id: "roster",           label: "قوائم الصفوف" } ] },
+      { id: "roster",           label: "قوائم الصفوف" },
+      { id: "duplicates",       label: "🔁 التكرارات" } ] },
   { id: "money",    label: "المالية",  tabs: [
       { id: "payments",         label: "الدفعات" },
       { id: "financeReport",    label: "📄 التقارير" } ] },
@@ -4041,6 +4272,8 @@ const ADMIN_GROUPS = [
   { id: "logs",     label: "🕓 السجلات", tabs: [
       { id: "loginLog",         label: "سجل الدخول" },
       { id: "changeLog",        label: "سجل التغييرات" } ] },
+  { id: "pageFeatures", label: "⚙️ ميزات الصفحة", tabs: [
+      { id: "pageFeatures",     label: "ميزات الصفحة" } ] },
 ];
 
 const ADMIN_TAB_RENDERERS = {
@@ -4067,11 +4300,14 @@ const ADMIN_TAB_RENDERERS = {
   adminAccounts:    () => renderAdminAccountsTab(),
   financeReport:    () => renderFinanceReportTab(),
   absenceReport:    () => renderAbsenceReportTab(),
+  duplicates:       () => renderDuplicateNamesReportTab(),
+  pageFeatures:      () => renderPageFeaturesTab(),
 };
 
 // تبويبات المجموعة المرئية فعلياً — تُخفي أي تبويب "ownerOnly" عن غير المالك
 function visibleTabs(group) {
-  return group.tabs.filter(t => !t.ownerOnly || isOwner());
+  const hidden = isOwner() ? new Set() : getHiddenAdminTabs();
+  return group.tabs.filter(t => (!t.ownerOnly || isOwner()) && !hidden.has(t.id));
 }
 
 // اختيار مجموعة يفتح أول تبويب مرئي فيها
@@ -4188,7 +4424,7 @@ async function submitAddAnnouncement(e) {
     const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(payload) });
     const data = await res.json();
     if (data.ok) {
-      addAnnMsg = `<div class="form-msg ok">تم نشر الإعلان ✓</div>`;
+      hapticSuccess(); addAnnMsg = `<div class="form-msg ok">تم نشر الإعلان ✓</div>`;
       if (!staffSession.announcements) staffSession.announcements = [];
       staffSession.announcements.push({ ...payload, Announcement_ID: data.newAnnouncementId, Status: "Active" });
     } else {
@@ -4358,7 +4594,7 @@ async function submitAddExam(e) {
     const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(payload) });
     const data = await res.json();
     if (data.ok) {
-      addExamMsg = `<div class="form-msg ok">تمت إضافة الامتحان ✓</div>`;
+      hapticSuccess(); addExamMsg = `<div class="form-msg ok">تمت إضافة الامتحان ✓</div>`;
       if (!staffSession.exams) staffSession.exams = [];
       staffSession.exams.push({ ...payload, Exam_ID: data.newExamId, Status: "Active" });
     } else {
@@ -4424,44 +4660,15 @@ async function toggleExamStatus(examId, newStatus) {
 // لوحة المدير - توزيع المواد على المعلمين
 // ---------------------------------------------------------------------------
 
-let addTAMsg = "";
 let taFilterTeacher = "";
 // يحتفظ بآخر قيم مُدخلة بنموذج التوزيع حتى لا ترتد القوائم لأول خيار بعد الحفظ
-let taLastValues = { teacher: "", classLevel: "", section: "", subject: "" };
 
 function renderAdminTeacherAssignmentsTab() {
+  // تبويب عرض فقط: نظرة شاملة على كل إسنادات المدرسة دفعة واحدة (مين بيدرّس شو بكل صف).
+  // التعديل والإضافة صارا حصراً من زر «🧩 المواد» تحت كل معلم بتبويب «المعلمون»، لتفادي وجود مكانين للإجراء نفسه.
   const teachers = (staffSession.teachers || []).filter(t =>
     !isAdminRoleClient(t.Role) && String(t.Status || "Active").trim() !== "Inactive"
   );
-  const teacherOptions = teachers.map(t =>
-    `<option value="${t.Username}" ${t.Username === taLastValues.teacher ? "selected" : ""}>${t.Name || t.Username} (${t.Username})</option>`).join("");
-  const classOptions = CLASS_LEVELS_LIST.map(c =>
-    `<option value="${c}" ${c === taLastValues.classLevel ? "selected" : ""}>${c}</option>`).join("");
-  const subjectOptions = SUBJECTS.map(x =>
-    `<option value="${x}" ${x === taLastValues.subject ? "selected" : ""}>${x}</option>`).join("");
-
-  const addCard = `
-    <div class="form-card">
-      <div class="section-title">🧩 إسناد مادة لمعلم</div>
-      <form id="addTAForm">
-        <div class="form-field"><label>المعلم</label><select id="taTeacher" required>${teacherOptions}</select></div>
-        <div class="form-field"><label>الصف</label><select id="taClass" required>${classOptions}</select></div>
-        <div class="form-field">
-          <label>الشعبة</label>
-          <select id="taSection">
-            <option value="" ${taLastValues.section === "" ? "selected" : ""}>كل شعب هذا الصف</option>
-            ${Array.from({length:8},(_,i)=>i+1).map(n => `<option value="${n}" ${String(n) === taLastValues.section ? "selected" : ""}>شعبة ${n}</option>`).join("")}
-          </select>
-        </div>
-        <div class="form-field"><label>المادة</label><select id="taSubject" required>${subjectOptions}</select></div>
-        <button type="submit" class="btn-save" id="addTABtn">إسناد المادة</button>
-        ${addTAMsg}
-      </form>
-      <div style="font-size:11.5px;color:var(--muted);margin-top:10px;">
-        المعلم الذي يدرّس عدة صفوف: أسند له سطراً لكل صف. المعلم بدون أي إسناد يعمل بصفه المسجّل في بطاقته.
-      </div>
-    </div>
-  `;
 
   let rows = (staffSession.teacherAssignments || []);
   const filterBar = `
@@ -4477,7 +4684,6 @@ function renderAdminTeacherAssignmentsTab() {
     rows = rows.filter(r => String(r.Username).trim() === taFilterTeacher);
   }
 
-  // تجميع حسب المعلم لعرض أوضح
   const byTeacher = {};
   rows.forEach(r => {
     const u = String(r.Username || "").trim();
@@ -4485,7 +4691,9 @@ function renderAdminTeacherAssignmentsTab() {
     byTeacher[u].push(r);
   });
 
-  let listHtml = filterBar + `<div class="section-title">التوزيع الحالي (${rows.length} إسناد)</div>`;
+  const note = `<div style="font-size:11.5px;color:var(--muted);margin:-4px 0 14px;">للتعديل أو الإضافة: افتح تبويب «المعلمون» واضغط زر «🧩 المواد» تحت اسم المعلم.</div>`;
+
+  let listHtml = filterBar + note + `<div class="section-title">التوزيع الحالي (${rows.length} إسناد)</div>`;
   if (rows.length === 0) {
     listHtml += `${emptyState("🧩", "لا يوجد توزيع مسجّل بعد", "")}`;
   } else {
@@ -4503,9 +4711,9 @@ function renderAdminTeacherAssignmentsTab() {
               <div class="name">${r.Subject}</div>
               <div class="meta">${r.Class_Level} · ${secLabel}</div>
             </div>
-            <button class="status-pill ${isActive ? "status-active" : "status-inactive"}" onclick="toggleTeacherAssignment('${r.Assignment_ID}','${isActive ? "Inactive" : "Active"}')">
+            <span class="status-pill ${isActive ? "status-active" : "status-inactive"}" style="cursor:default;">
               ${isActive ? "فعّال" : "معطّل"}
-            </button>
+            </span>
           </div>
         `;
       });
@@ -4513,50 +4721,10 @@ function renderAdminTeacherAssignmentsTab() {
     });
   }
 
-  return collapseAddCard("ta", addCard) + listHtml;
+  return listHtml;
 }
 
-async function submitAddTeacherAssignment(e) {
-  e.preventDefault();
-  const btn = document.getElementById("addTABtn");
-  btn.disabled = true; btn.textContent = "جارِ الحفظ...";
 
-  const payload = {
-    action: "addTeacherAssignment",
-    adminUsername: staffSession.username,
-    adminPassword: staffSession._password,
-    Username: document.getElementById("taTeacher").value,
-    Class_Level: document.getElementById("taClass").value,
-    Section: document.getElementById("taSection").value,
-    Subject: document.getElementById("taSubject").value
-  };
-
-  // احفظ القيم المُختارة حتى تبقى ظاهرة بالنموذج بعد إعادة الرسم (مفيد لإضافة عدة مواد بالتتابع لنفس المعلم/الصف)
-  taLastValues = { teacher: payload.Username, classLevel: payload.Class_Level, section: payload.Section, subject: payload.Subject };
-
-  try {
-    const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(payload) });
-    const data = await res.json();
-    if (data.ok) {
-      addTAMsg = data.warning
-        ? `<div class="form-msg err">تم الإسناد ✓ — ${data.warning}</div>`
-        : `<div class="form-msg ok">تم الإسناد ✓</div>`;
-      if (!staffSession.teacherAssignments) staffSession.teacherAssignments = [];
-      const t = (staffSession.teachers || []).find(x => x.Username === payload.Username);
-      staffSession.teacherAssignments.push({
-        Assignment_ID: data.newAssignmentId, Username: payload.Username,
-        Teacher_Name: t ? (t.Name || t.Username) : payload.Username,
-        Class_Level: payload.Class_Level, Section: payload.Section,
-        Subject: payload.Subject, Status: "Active"
-      });
-    } else {
-      addTAMsg = `<div class="form-msg err">${data.error}</div>`;
-    }
-  } catch (err) {
-    addTAMsg = `<div class="form-msg err">تعذر الاتصال بالخادم</div>`;
-  }
-  renderDashboard();
-}
 
 async function toggleTeacherAssignment(assignmentId, newStatus) {
   const payload = {
@@ -4787,14 +4955,12 @@ function renderAdminDashboardTab() {
     !isAdminRoleClient(t.Role) && String(t.Status || "Active").trim() !== "Inactive");
   const supervisors = (staffSession.supervisors || []).filter(s => String(s.Status || "Active").trim() !== "Inactive");
 
-  // --- المالية: نأخذ آخر Total_Required وآخر Remaining_Balance مسجّلين لكل والد (وليس مجموع كل الصفوف) ---
-  const activePayments = (staffSession.payments || []).filter(p => String(p.Status || "Active").trim() !== "Void");
-  const lastByParent = {};
-  activePayments.forEach(p => { lastByParent[String(p.Parent_ID).trim()] = p; }); // الأحدث يطغى (ترتيب الشيت زمني)
+  // --- المالية: الإجمالي والمتبقي محسوبان حيّاً لكل ولي أمر من رسوم أبنائه الفعّالين ---
   let totalRequired = 0, totalRemaining = 0;
-  Object.values(lastByParent).forEach(p => {
-    totalRequired += parseMoney(p.Total_Required);
-    totalRemaining += parseMoney(p.Remaining_Balance);
+  (staffSession.parents || []).forEach(p => {
+    const f = financeOf(p.Parent_ID);
+    totalRequired += f.required;
+    totalRemaining += f.remaining;
   });
   const totalCollected = Math.max(0, totalRequired - totalRemaining);
   const collectedPct = totalRequired > 0 ? (totalCollected / totalRequired) * 100 : 0;
@@ -4908,6 +5074,63 @@ function getSettingValue(key) {
   return row ? String(row.Value || "").trim() : "";
 }
 
+// يجمع عناصر قائمة حسب اسمها بعد تطبيع الهمزات/التاء المربوطة، ويُرجع المجموعات التي تكرّرت (أكثر من عنصر)
+function groupDuplicateNames(list, nameField) {
+  const map = {};
+  (list || []).forEach((item) => {
+    const norm = normalizeArabicName(item[nameField]);
+    if (!norm) return;
+    (map[norm] = map[norm] || []).push(item);
+  });
+  return Object.values(map).filter((g) => g.length > 1);
+}
+
+function renderDuplicateNamesReportTab() {
+  const activeStudents = (staffSession.students || []).filter((s) => String(s.Status || "Active").trim() !== "Inactive");
+  const activeParents = (staffSession.parents || []).filter((p) => String(p.Status || "Active").trim() !== "Inactive");
+  const studentGroups = groupDuplicateNames(activeStudents, "Student_Name");
+  const parentGroups = groupDuplicateNames(activeParents, "Parent_Name");
+
+  const studentsHtml = studentGroups.length === 0
+    ? emptyState("✅", "لا يوجد أي اسم طالب مكرر حالياً", "")
+    : studentGroups.map((g) => `
+        <div class="form-card" style="padding:12px 14px;">
+          <div class="supervisor-name">${staffEsc(g[0].Student_Name)} <span style="font-size:11.5px;color:var(--muted);">(${g.length} طلاب)</span></div>
+          ${g.map((s) => `
+            <div class="student-row" style="margin-top:8px;">
+              <div class="student-info">
+                <div class="name">${staffEsc(s.Student_ID)}</div>
+                <div class="meta">${staffEsc(s.Class_Level || "")}${s.Section ? " · شعبة " + staffEsc(s.Section) : ""} · ولي الأمر: ${staffEsc(s.Parent_Name || "-")}</div>
+              </div>
+            </div>`).join("")}
+        </div>`).join("");
+
+  const parentsHtml = parentGroups.length === 0
+    ? emptyState("✅", "لا يوجد أي اسم ولي أمر مكرر حالياً", "")
+    : parentGroups.map((g) => `
+        <div class="form-card" style="padding:12px 14px;">
+          <div class="supervisor-name">${staffEsc(g[0].Parent_Name)} <span style="font-size:11.5px;color:var(--muted);">(${g.length})</span></div>
+          ${g.map((p) => `
+            <div class="student-row" style="margin-top:8px;">
+              <div class="student-info">
+                <div class="name">${staffEsc(p.Parent_ID)}</div>
+                <div class="meta">📞 ${staffEsc(p.Phone || "-")}</div>
+              </div>
+            </div>`).join("")}
+        </div>`).join("");
+
+  return `
+    <div style="font-size:11.5px;color:var(--muted);margin-bottom:14px;">
+      فحص لكل الأسماء الفعّالة حالياً (يتجاهل الهمزات والتاء المربوطة والتشكيل)، لاكتشاف أي تكرار — سواء أُدخل من التطبيق أو أُضيف مباشرة بجدول البيانات.
+    </div>
+    <div class="section-title">🔁 أسماء طلاب مكررة (${studentGroups.length})</div>
+    ${studentsHtml}
+    <div class="section-title" style="margin-top:20px;">🔁 أسماء أولياء أمور مكررة (${parentGroups.length})</div>
+    ${parentsHtml}
+  `;
+}
+
+let defaultFeesMsg = "";
 function renderAdminSettingsTab() {
   if (staffSession._fromCache) return emptyState("⏳", "جارٍ تحديث البيانات…", "ستظهر الإعدادات بعد لحظات.");
   const whatsapp = getSettingValue("Admin_WhatsApp");
@@ -4939,7 +5162,50 @@ function renderAdminSettingsTab() {
         ${settingsMsg}
       </form>
     </div>
+    <div class="form-card">
+      <div class="section-title">💰 الرسوم الافتراضية لكل صف</div>
+      <div style="font-size:11.5px;color:var(--muted);margin-bottom:12px;">
+        تُقترح تلقائياً عند إضافة طالب جديد حسب صفّه، ويمكن تعديل رسم أي طالب لحاله دائماً. تعديل الأرقام هنا لا يغيّر رسوم الطلاب المسجَّلين مسبقاً ممن لهم رسم خاص محفوظ، بل يؤثر فقط على من لا رسم مكتوب له.
+      </div>
+      <form id="defaultFeesForm">
+        ${CLASS_LEVELS_LIST.map((c, i) => `
+          <div class="form-field"><label>${c}</label><input class="fee-input" data-class="${c}" type="number" min="0" value="${(getDefaultFeesMap()[c] !== undefined ? getDefaultFeesMap()[c] : "")}" required /></div>
+        `).join("")}
+        <button type="submit" class="btn-save" id="saveDefaultFeesBtn">حفظ الرسوم الافتراضية</button>
+        ${defaultFeesMsg}
+      </form>
+    </div>
   `;
+}
+
+async function submitDefaultFees(e) {
+  e.preventDefault();
+  const btn = document.getElementById("saveDefaultFeesBtn");
+  btn.disabled = true;
+  btn.textContent = "جارِ الحفظ...";
+
+  const map = {};
+  document.querySelectorAll("#defaultFeesForm .fee-input").forEach((el) => { map[el.dataset.class] = Number(el.value) || 0; });
+
+  try {
+    const res = await fetch(API_URL, { method: "POST", body: JSON.stringify({
+      action: "updateSetting", adminUsername: staffSession.username, adminPassword: staffSession._password,
+      Key: "Default_Fees_JSON", Value: JSON.stringify(map) }) });
+    const data = await res.json();
+    if (data.ok) {
+      hapticSuccess();
+      if (!staffSession.settings) staffSession.settings = [];
+      const row = staffSession.settings.find((r) => r.Key === "Default_Fees_JSON");
+      const val = JSON.stringify(map);
+      if (row) row.Value = val; else staffSession.settings.push({ Key: "Default_Fees_JSON", Value: val });
+      defaultFeesMsg = `<div class="form-msg ok">تم الحفظ ✓</div>`;
+    } else {
+      defaultFeesMsg = `<div class="form-msg err">${data.error}</div>`;
+    }
+  } catch (err) {
+    defaultFeesMsg = `<div class="form-msg err">تعذر الاتصال بالخادم</div>`;
+  }
+  renderDashboard();
 }
 
 async function submitSettings(e) {
@@ -4971,7 +5237,7 @@ async function submitSettings(e) {
       const row = staffSession.settings.find(r => r.Key === entry.Key);
       if (row) row.Value = entry.Value; else staffSession.settings.push({ Key: entry.Key, Value: entry.Value });
     }
-    settingsMsg = `<div class="form-msg ok">تم الحفظ ✓</div>`;
+    hapticSuccess(); settingsMsg = `<div class="form-msg ok">تم الحفظ ✓</div>`;
   } catch (err) {
     settingsMsg = `<div class="form-msg err">تعذر الاتصال بالخادم</div>`;
   }
@@ -5088,7 +5354,7 @@ async function submitAddAdmin(e) {
     const data = await res.json();
     if (data.ok) {
       lastAddedCreds.admin = { phone: payload.Phone, name: payload.Name || payload.Username, username: payload.Username, password: payload.Password };
-      addAdminMsg = `<div class="form-msg ok">تمت الإضافة ✓${payload.Phone ? credentialsWhatsappButtonHtml("admin") : ""}</div>`;
+      hapticSuccess(); addAdminMsg = `<div class="form-msg ok">تمت الإضافة ✓${payload.Phone ? credentialsWhatsappButtonHtml("admin") : ""}</div>`;
       staffSession.teachers.push({
         Username: payload.Username, Name: payload.Name, Phone: payload.Phone,
         Role: payload.Role, Status: "Active", Password: payload.Password
@@ -5322,79 +5588,39 @@ const NAV_ICONS = {
   grades: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V11"/><path d="M12 20V4"/><path d="M19 20v-7"/><path d="M3 20h18"/></svg>',
   book: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h10a2.5 2.5 0 0 1 2.5 2.5v14H8.5A2.5 2.5 0 0 1 6 17.5z"/><path d="M9.5 8.5h6M9.5 12h6"/></svg>',
   more: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18.5" cy="12" r="1.7"/></svg>',
+  teach: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="7" width="16" height="12" rx="2"/><path d="M9 7V5.5A2.5 2.5 0 0 1 11.5 3h1A2.5 2.5 0 0 1 15 5.5V7"/></svg>',
+  school: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V9l8-5 8 5v12"/><path d="M9 21v-6h6v6"/><path d="M4 21h16"/></svg>',
+  logs: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
+  gear: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.4M12 18.6V21M21 12h-2.4M5.4 12H3M18.4 5.6l-1.7 1.7M7.3 16.7l-1.7 1.7M18.4 18.4l-1.7-1.7M7.3 7.3 5.6 5.6"/></svg>',
+  search: '<span class="nav-emoji">🔎</span>', note: '<span class="nav-emoji">✍️</span>',
+  bell: '<span class="nav-emoji">📢</span>', trophy: '<span class="nav-emoji">🏆</span>',
 };
-function navMain() {
-  if (isAdmin()) return [
-    { key: "dashboard", label: "الرئيسية", icon: "home", active: adminGroup === "dashboard" },
-    { key: "students", label: "الطلاب", icon: "users", active: adminGroup === "students" },
-    { key: "money", label: "المالية", icon: "wallet", active: adminGroup === "money" },
-    { key: "attend", label: "الحضور", icon: "attend", active: adminGroup === "attend" },
-  ];
-  return [
-    { key: "dashboard", label: "الرئيسية", icon: "home", active: teacherTab === "dashboard" },
-    { key: "attendance", label: "الحضور", icon: "attend", active: teacherTab === "attendance" },
-    { key: "grades", label: "العلامات", icon: "grades", active: teacherTab === "grades" },
-    { key: "assignments", label: "الواجبات", icon: "book", active: teacherTab === "assignments" },
-  ];
-}
-function navMore() {
-  if (isAdmin()) return [
-    { key: "academic", icon: "🎓", label: "الأكاديمي", sub: "العلامات · الترتيب · السلوك · الواجبات" },
-    { key: "staff", icon: "🧑‍🏫", label: "الطاقم", sub: "المعلمون · توزيع المواد · الباص" },
-    { key: "school", icon: "🏛️", label: "المدرسة", sub: "الإعلانات · الامتحانات · العطل" },
-    { key: "logs", icon: "🕓", label: "السجلات", sub: "سجل الدخول · سجل التغييرات" },
-  ];
-  return [
-    { key: "roster", icon: "👥", label: "طلابي", sub: "" },
-    { key: "attendanceSearch", icon: "🔎", label: "سجل الحضور", sub: "" },
-    { key: "behavior", icon: "✍️", label: "السلوك", sub: "" },
-    { key: "announcements", icon: "📢", label: "الإعلانات", sub: "" },
-    { key: "ranking", icon: "🏆", label: "الترتيب", sub: "" },
-  ];
-}
-function renderBottomNav() {
-  const main = navMain();
-  const moreActive = !main.some((x) => x.active);
+function staffInstallStatusRowHtml() {
+  const installed = staffIsStandalone();
+  const plat = staffInstallPlatform();
+  let action;
+  if (installed) {
+    action = `<span class="install-badge ok">✅ مثبّت</span>`;
+  } else if (staffInstallPrompt) {
+    action = `<button type="button" class="ib main" style="padding:7px 16px;" onclick="installStaffApp()">تثبيت الآن</button>`;
+  } else if (plat === "ios") {
+    action = `<button type="button" class="ib" style="padding:7px 16px;" onclick="alert('اضغط زر المشاركة ⬆️ أسفل المتصفح في Safari، ثم اختر «إضافة إلى الشاشة الرئيسية».')">كيف أثبّته؟</button>`;
+  } else if (plat === "android") {
+    action = `<button type="button" class="ib" style="padding:7px 16px;" onclick="alert('افتح قائمة المتصفح ⋮ ثم اختر «تثبيت التطبيق» أو «إضافة إلى الشاشة الرئيسية».')">كيف أثبّته؟</button>`;
+  } else {
+    action = `<span class="install-badge">غير متاح على هذا المتصفح</span>`;
+  }
   return `
-    <nav class="snav" aria-label="التنقل الرئيسي">
-      ${main.map((x) => `<button type="button" class="nav-btn ${x.active ? "active" : ""}" data-nav="${x.key}" onclick="navSelect('${x.key}')">${NAV_ICONS[x.icon]}<span>${x.label}</span></button>`).join("")}
-      <button type="button" class="nav-btn more ${moreActive ? "active" : ""}" onclick="toggleMoreSheet(true)" aria-haspopup="dialog">${NAV_ICONS.more}<span>المزيد</span></button>
-    </nav>`;
-}
-function renderMoreSheet() {
-  const seg = (kind, items, cur, fn) => `<div class="seg">${items.map(([k, lab]) => `<button type="button" class="seg-b ${k === cur ? "on" : ""}" data-kind="${kind}" data-val="${k}" onclick="${fn}('${k}')">${lab}</button>`).join("")}</div>`;
-  const cur = navMore().find((x) => (isAdmin() ? x.key === adminGroup : x.key === teacherTab));
-  return `
-    <div class="sheet" id="moreSheet" role="dialog" aria-modal="true" aria-label="المزيد">
-      <div class="sheet-back" onclick="toggleMoreSheet(false)"></div>
-      <div class="sheet-panel">
-        <div class="sheet-grip"></div>
-        <div class="sheet-title">المزيد</div>
-        <div class="sheet-grid">
-          ${navMore().map((x) => `<button type="button" class="sheet-item ${cur && cur.key === x.key ? "on" : ""}" data-nav="${x.key}" onclick="navSelect('${x.key}')"><span class="si-ic">${x.icon}</span><span class="si-t">${x.label}</span>${x.sub ? `<span class="si-s">${x.sub}</span>` : ""}</button>`).join("")}
-        </div>
-        <div class="sheet-sec">إعدادات العرض</div>
-        <div class="set-row"><div class="set-lab">المظهر</div>${seg("theme", [["auto", "تلقائي"], ["light", "فاتح"], ["dark", "ليلي"]], getStaffThemePref(), "setStaffThemePref")}</div>
-        <div class="set-row"><div class="set-lab">حجم الخط</div>${seg("font", [["n", "عادي"], ["l", "كبير"], ["xl", "أكبر"]], getStaffFontPref(), "setStaffFontPref")}</div>
-        <div class="set-hint">«تلقائي» يتبع إعداد الوضع الليلي في جوالك.</div>
-        <button type="button" class="sheet-close" onclick="toggleMoreSheet(false)">إغلاق</button>
+    <div class="set-row">
+      <div class="set-lab">التطبيق</div>
+      <div class="install-row">
+        <span class="install-state ${installed ? "ok" : ""}">${installed ? "مثبّت على جهازك" : "غير مثبّت بعد"}</span>
+        ${action}
       </div>
     </div>`;
 }
-function toggleMoreSheet(open) {
-  const el = document.getElementById("moreSheet");
-  if (!el) return;
-  el.classList.toggle("open", !!open);
-  document.body.classList.toggle("sheet-open", !!open || gsOpen);
-  if (open) { const b = el.querySelector(".sheet-item, .seg-b"); if (b) setTimeout(() => b.focus({ preventScroll: true }), 50); }
-}
-function navSelect(key) {
-  toggleMoreSheet(false);
-  if (isAdmin()) selectAdminGroup(key);
-  else { teacherTab = key; if (key === "dashboard") nextStaffCheer(); renderDashboard(); }
-  window.scrollTo(0, 0);
-}
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") toggleMoreSheet(false); });
+
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") toggleSettingsSheet(false); });
 
 // ---------- تنبيه "ثبّت التطبيق" ----------
 let staffInstallPrompt = null;
@@ -5411,8 +5637,10 @@ function staffInstallHiddenUntil() {
   try { return Number(localStorage.getItem("masar_staff_install_hide") || 0); } catch (e) { return 0; }
 }
 function installBannerHtml() {
-  if (staffIsStandalone() || staffInstallPlatform() === "other" || Date.now() < staffInstallHiddenUntil()) return "";
+  if (staffIsStandalone() || Date.now() < staffInstallHiddenUntil()) return "";
   const plat = staffInstallPlatform();
+  // نُخفي البانر فقط على متصفح كمبيوتر لا يدعم التثبيت إطلاقاً
+  if (plat === "other" && !staffInstallPrompt) return "";
   const how = plat === "ios"
     ? "اضغط زر المشاركة <b>⬆️</b> بأسفل المتصفح، ثم اختر «إضافة إلى الشاشة الرئيسية»."
     : (staffInstallPrompt ? "" : "افتح قائمة المتصفح <b>⋮</b> ثم اختر «تثبيت التطبيق».");
@@ -5423,7 +5651,7 @@ function installBannerHtml() {
       ${how ? `<div class="install-how">${how}</div>` : ""}
       <div class="install-btns">
         ${staffInstallPrompt ? `<button type="button" class="ib main" onclick="installStaffApp()">تثبيت الآن</button>` : ""}
-        <button type="button" class="ib" onclick="hideStaffInstall(7)">ليس الآن</button>
+        <button type="button" class="ib" onclick="hideStaffInstall(3)">ليس الآن</button>
         <button type="button" class="ib" onclick="hideStaffInstall(36500)">لا تذكّرني</button>
       </div>
     </div>`;
@@ -5442,7 +5670,12 @@ async function installStaffApp() {
   staffInstallPrompt = null;
   if (staffSession) renderDashboard();
 }
-window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); staffInstallPrompt = e; if (staffSession) renderDashboard(); });
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  staffInstallPrompt = e;
+  if (staffSession) renderDashboard();
+  else if (document.getElementById("loginForm")) renderLogin();
+});
 window.addEventListener("appinstalled", () => {
   try { localStorage.setItem("masar_staff_install_hide", String(Date.now() + 36500 * 86400000)); } catch (e) {}
   staffInstallPrompt = null;
@@ -5537,13 +5770,38 @@ function kidsOf(pid) {
   return (staffSession.students || []).filter(s =>
     String(s.Parent_ID).trim() === String(pid).trim() && String(s.Status || "Active").trim() !== "Inactive");
 }
+// رسوم افتراضية لكل صف (نفس قيم البداية بالخادم؛ الإعداد المحفوظ Default_Fees_JSON يطغى عليها إن وُجد)
+const FALLBACK_DEFAULT_FEES = {
+  "الروضة": 650, "الصف الاول": 650, "الصف الثاني": 650, "الصف الثالث": 650, "الصف الرابع": 650,
+  "الصف الخامس": 700, "الصف السادس": 700, "الصف السابع": 700, "الصف الثامن": 700, "الصف التاسع": 700,
+};
+function getDefaultFeesMap() {
+  try {
+    const raw = getSettingValue("Default_Fees_JSON");
+    if (raw) { const parsed = JSON.parse(raw); if (parsed && typeof parsed === "object") return parsed; }
+  } catch (e) { /* تجاهل — نستخدم الافتراضي */ }
+  return FALLBACK_DEFAULT_FEES;
+}
+// يعبّئ حقل الرسوم تلقائياً عند اختيار الصف (نموذج إضافة/تعديل طالب)؛ يبقى قابلاً للتعديل يدوياً بعدها
+function autoFillFee(feeFieldId, classLevel) {
+  const el = document.getElementById(feeFieldId);
+  const map = getDefaultFeesMap();
+  if (el && classLevel && map[classLevel] !== undefined) el.value = map[classLevel];
+}
+// رسوم طالب واحد: قيمته الخاصة إن كُتبت، وإلا الرسم الافتراضي لصفّه
+function feeForStudentClient(s) {
+  const explicit = parseMoney(s.Tuition_Fee);
+  if (explicit > 0) return explicit;
+  const map = getDefaultFeesMap();
+  return parseMoney(map[String(s.Class_Level || "").trim()] || 0);
+}
+// الإجمالي المطلوب لولي أمر = مجموع رسوم أبنائه الفعّالين (وليس رقماً يُدخل يدوياً). محسوب دائماً حيّاً.
 function financeOf(pid) {
+  const required = kidsOf(pid).reduce((sum, s) => sum + feeForStudentClient(s), 0);
   const rows = (staffSession.payments || []).filter(p =>
     String(p.Parent_ID).trim() === String(pid).trim() && String(p.Status || "Active").trim() !== "Void");
-  if (rows.length === 0) return { has: false, required: 0, paid: 0, remaining: 0, rows: [] };
-  const required = parseMoney(rows[rows.length - 1].Total_Required);
   const paid = rows.reduce((sum, p) => sum + parseMoney(p.Amount), 0);
-  return { has: true, required, paid, remaining: Math.max(0, required - paid), rows: rows.slice().reverse() };
+  return { has: required > 0 || rows.length > 0, required, paid, remaining: Math.max(0, required - paid), rows: rows.slice().reverse() };
 }
 function allFinance() {
   return (staffSession.parents || []).map(p => ({ p, f: financeOf(p.Parent_ID), kids: kidsOf(p.Parent_ID) })).filter(x => x.f.has);
@@ -5922,6 +6180,11 @@ function renderAbsenceReportTab() {
     ${r.rows.length ? `<div class="rep-scroll">${repTable(r.head, shown, "")}</div>${r.rows.length > 30 ? `<div class="pr-more">تُعرض أول 30 من ${r.rows.length} — كل الصفوف بنسخة الطباعة.</div>` : ""}` : emptyState("✅", "لا غياب ولا تأخير بهذه الفترة", "")}`;
 }
 
+// اهتزاز خفيف قصير عند نجاح إجراء صريح من المستخدم (حفظ، دخول). لا يُستدعى من التحديث الصامت بالخلفية.
+function hapticSuccess() {
+  try { if (navigator.vibrate) navigator.vibrate(35); } catch (e) {}
+}
+
 function renderDashboard() {
   const activeId = document.activeElement ? document.activeElement.id : null;
   const app = document.getElementById("app");
@@ -5933,6 +6196,20 @@ function renderDashboard() {
     subs: (document.getElementById("subTabsBar") || {}).scrollLeft || 0,
     teacher: (document.getElementById("teacherTabsBar") || {}).scrollLeft || 0
   };
+
+  // المالك مستثنى دائماً من أي إعادة توجيه بسبب الإخفاء — يرى ويصل لكل شيء دوماً
+  if (!isOwner()) {
+    if (isAdmin() && adminGroup !== "pageFeatures") {
+      const hiddenA = getHiddenAdminTabs();
+      if (!isAdminGroupVisible(adminGroup, hiddenA)) { adminGroup = "dashboard"; adminTab = "dashboard"; }
+      else {
+        const grp = ADMIN_GROUPS.find((g) => g.id === adminGroup);
+        const vt = grp ? visibleTabs(grp) : [];
+        if (grp && !vt.some((t) => t.id === adminTab)) adminTab = vt.length ? vt[0].id : "dashboard";
+      }
+    }
+    if (!isAdmin() && teacherTab !== "dashboard" && getHiddenTeacherTabs().has(teacherTab)) teacherTab = "dashboard";
+  }
 
   let contentHtml = "";
   if (isAdmin()) {
@@ -5967,6 +6244,7 @@ function renderDashboard() {
         <button class="logout-btn" onclick="toggleStaffDarkMode();renderDashboard();" title="الوضع الليلي">
           ${document.body.classList.contains('dark') ? '☀️' : '🌙'}
         </button>
+        <button class="logout-btn" onclick="toggleSettingsSheet(true)" title="إعدادات العرض" aria-label="إعدادات العرض">🔧</button>
         <button id="refreshBtn" class="logout-btn">🔄 تحديث</button>
         <button id="logoutBtn" class="logout-btn">خروج</button>
       </div>
@@ -5974,7 +6252,7 @@ function renderDashboard() {
     <div id="syncBar" class="sync-bar">${staffSyncText()}</div>
     <div class="content">${contentHtml}</div>
     ${renderBottomNav()}
-    ${renderMoreSheet()}
+    ${renderSettingsSheet()}
     ${renderGlobalSheet()}
   `;
 
@@ -6062,9 +6340,9 @@ function renderDashboard() {
   const assignmentForm = document.getElementById("assignmentForm");
   if (assignmentForm) assignmentForm.addEventListener("submit", submitAssignment);
 
-  const addTAForm = document.getElementById("addTAForm");
-  if (addTAForm) addTAForm.addEventListener("submit", submitAddTeacherAssignment);
 
+  const defaultFeesForm = document.getElementById("defaultFeesForm");
+  if (defaultFeesForm) defaultFeesForm.addEventListener("submit", submitDefaultFees);
   const settingsForm = document.getElementById("settingsForm");
   if (settingsForm) settingsForm.addEventListener("submit", submitSettings);
 
