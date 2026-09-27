@@ -110,6 +110,7 @@ let wakeLock = null;
 let stats = null;
 let studentFilter = "";
 let classFilter = "الكل";
+let lastError = "";
 
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, m => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m])); }
 
@@ -177,14 +178,25 @@ async function endTrip() {
   busy = false; render();
 }
 
+function geoErrorText(err) {
+  if (!err) return "خطأ غير معروف بتحديد الموقع";
+  const map = {
+    1: "تم رفض إذن الموقع (PERMISSION_DENIED) — تحقق من إعدادات الموقع بالمتصفح/التطبيق",
+    2: "تعذر تحديد الموقع حالياً (POSITION_UNAVAILABLE) — تأكد إن GPS شغّال وإنك برّا",
+    3: "انتهت مهلة تحديد الموقع (TIMEOUT) — قد تكون إشارة GPS ضعيفة",
+  };
+  return map[err.code] || ("خطأ: " + (err.message || err.code || "غير معروف"));
+}
+
 function startLocationLoop() {
   requestWakeLock();
-  if (!("geolocation" in navigator)) { alert("الجهاز لا يدعم تحديد الموقع"); return; }
+  if (!("geolocation" in navigator)) { lastError = "الجهاز/المتصفح لا يدعم تحديد الموقع إطلاقاً"; render(); return; }
   locationPingCount = 0;
+  lastError = "";
   sendLocationOnce();
   watchId = navigator.geolocation.watchPosition(
-    (pos) => { lastPos = pos; },
-    (err) => { console.error("geo error", err); },
+    (pos) => { lastPos = pos; lastError = ""; if (activeTab === "trip") render(); },
+    (err) => { lastError = "watchPosition: " + geoErrorText(err); if (activeTab === "trip") render(); },
     { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
   );
   pingInterval = setInterval(sendLocationOnce, 12000);
@@ -198,7 +210,11 @@ let pingInterval = null;
 async function sendLocationOnce() {
   if (!lastPos) {
     // أول قراءة لسّا ما وصلت من watchPosition — نطلب قراءة فورية واحدة بدل الانتظار
-    navigator.geolocation.getCurrentPosition((pos) => { lastPos = pos; postLocation(pos); }, () => {}, { enableHighAccuracy: true, timeout: 15000 });
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { lastPos = pos; lastError = ""; postLocation(pos); },
+      (err) => { lastError = "getCurrentPosition: " + geoErrorText(err); if (activeTab === "trip") render(); },
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
     return;
   }
   postLocation(lastPos);
@@ -214,8 +230,9 @@ async function postLocation(pos) {
       }),
     });
     const data = await res.json();
-    if (data.ok) { locationPingCount++; if (activeTab === "trip") render(); }
-  } catch (err) { /* تجاهل فشل إرسال نبضة واحدة، المحاولة القادمة بعد قليل */ }
+    if (data.ok) { locationPingCount++; lastError = ""; if (activeTab === "trip") render(); }
+    else { lastError = "رفض الخادم: " + (data.error || "غير معروف"); if (activeTab === "trip") render(); }
+  } catch (err) { lastError = "فشل الاتصال بالخادم: " + (err.message || err); if (activeTab === "trip") render(); }
 }
 
 function stopLocationLoop() {
@@ -328,6 +345,7 @@ function renderTripTab() {
         ${busy ? "..." : (active ? "إنهاء الرحلة" : "ابدأ الرحلة")}
       </button>
       ${active ? `<div class="ping-status"><span class="ping-dot"></span> تم إرسال ${locationPingCount} نبضة موقع</div>` : `<div class="trip-note">اضغطي "ابدأ الرحلة" عند انطلاق الباص — رح توصل رسالة تلقائية لأولياء الأمور، وتظهر خريطة حية بتطبيقهم.</div>`}
+      ${lastError ? `<div class="wake-warning" style="margin-top:12px;background:#FBE0DC;border-color:#E9A79C;color:#8A2E1E;">⚠️ ${esc(lastError)}</div>` : ""}
     </div>
   `;
 }
