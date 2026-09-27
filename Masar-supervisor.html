@@ -197,7 +197,7 @@ function startLocationLoop() {
   watchId = navigator.geolocation.watchPosition(
     (pos) => { lastPos = pos; lastError = ""; if (activeTab === "trip") render(); },
     (err) => { lastError = "watchPosition: " + geoErrorText(err); if (activeTab === "trip") render(); },
-    { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+    { enableHighAccuracy: false, maximumAge: 10000, timeout: 20000 }
   );
   pingInterval = setInterval(sendLocationOnce, 12000);
   if (tripTimerInterval) clearInterval(tripTimerInterval);
@@ -213,7 +213,7 @@ async function sendLocationOnce() {
     navigator.geolocation.getCurrentPosition(
       (pos) => { lastPos = pos; lastError = ""; postLocation(pos); },
       (err) => { lastError = "getCurrentPosition: " + geoErrorText(err); if (activeTab === "trip") render(); },
-      { enableHighAccuracy: true, timeout: 15000 }
+      { enableHighAccuracy: false, timeout: 20000 }
     );
     return;
   }
