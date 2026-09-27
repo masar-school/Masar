@@ -13,6 +13,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="مسار - الأهالي">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
   * { box-sizing: border-box; }
   :root {
@@ -23,7 +25,8 @@
     --bg: #12161F; --card: #1B2130; --border: #2A3142; --header: #0C1119; --gold: #D8B15C;
     --text: #EDEEF0; --muted: #9AA0AC; --muted2: #B4BAC6; --field-border: #2A3142;
   }
-  body { margin: 0; font-family: system-ui, Tahoma, Arial, sans-serif; background: var(--bg); transition: background .2s; }
+  html { overscroll-behavior-y: contain; }
+  body { overscroll-behavior-y: contain; margin: 0; font-family: system-ui, Tahoma, Arial, sans-serif; background: var(--bg); transition: background .2s; }
   #app { max-width: 420px; margin: 0 auto; min-height: 100vh; background: var(--bg); display: flex; flex-direction: column; }
 
   .header { background: var(--header); padding: 18px 18px 14px; display: flex; flex-direction: column; gap: 12px; border-bottom-left-radius: 20px; border-bottom-right-radius: 20px; }
@@ -85,6 +88,17 @@
   .bus-route { font-size: 13px; color: #B9C2D4; margin-bottom: 4px; }
   .bus-driver { font-size: 16px; font-weight: 600; }
   .bus-link { display: inline-block; margin-top: 12px; background: var(--gold); color: var(--header); font-size: 13px; font-weight: 600; padding: 8px 16px; border-radius: 10px; text-decoration: none; }
+
+  .live-track-btn { background: #2E7D32; color: #fff; text-decoration: none; font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 9px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+  .live-track-btn .dot { width: 7px; height: 7px; border-radius: 50%; background: #fff; animation: liveDot 1.4s infinite; }
+  @keyframes liveDot { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+  .live-map-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 999; display: flex; align-items: flex-end; justify-content: center; }
+  .live-map-sheet { background: var(--card); width: 100%; max-width: 420px; height: 78vh; border-top-left-radius: 20px; border-top-right-radius: 20px; overflow: hidden; display: flex; flex-direction: column; }
+  .live-map-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .live-map-title { font-size: 15px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; }
+  .live-map-close { background: var(--bg); border: none; width: 32px; height: 32px; border-radius: 10px; font-size: 15px; color: var(--text); cursor: pointer; }
+  #liveMapEl { flex: 1; }
+  .live-map-status { padding: 10px 16px; font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--border); text-align: center; }
 
   .task-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; margin-bottom: 10px; border-right: 4px solid var(--header); }
   .task-title { font-size: 14.5px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
@@ -304,6 +318,11 @@
   .install-s { font-size: 12.5px; color: var(--muted2); margin-top: 4px; line-height: 1.8; }
   .install-how { font-size: 12.5px; color: var(--text); background: var(--bg); border-radius: 10px; padding: 8px 10px; margin-top: 8px; line-height: 1.9; }
   .install-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .install-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .install-state { font-size: 12.5px; color: var(--muted2); }
+  .install-state.ok { color: var(--lv-great); font-weight: 600; }
+  .install-badge { font-size: 12px; padding: 5px 12px; border-radius: 12px; background: var(--bg); color: var(--muted2); border: 1px solid var(--border); }
+  .install-badge.ok { background: rgba(46,125,91,0.12); color: var(--lv-great); border-color: transparent; }
   .ib { font-family: inherit; font-size: 12.5px; padding: 7px 14px; border-radius: 10px; border: 1px solid var(--border); background: transparent; color: var(--muted2); cursor: pointer; }
   .ib.main { background: var(--header); color: #fff; border-color: var(--header); font-weight: 700; }
   body.dark .ib.main { background: var(--gold); color: var(--header); border-color: var(--gold); }
@@ -361,10 +380,34 @@
 </head>
 <body>
 <div id="app"></div>
+<script>
+// منع "السحب لإعادة التحميل" (Pull-to-refresh) دون التأثير على التمرير العادي داخل الصفحة.
+// المشكلة: إعادة التحميل الكاملة التي تنفّذها هذه الحركة تصفّر حالة الجافاسكربت وقد تُظهر
+// شاشة الدخول ولو كان "تذكرني" مفعّلاً. الحل هنا طبقتان: خاصية overscroll-behavior (CSS أعلاه)
+// كخط أول، وهذه الطبقة بالجافاسكربت كضمان يعمل حتى في المتصفحات التي لا تطبّق الخاصية بثبات
+// داخل تطبيق مثبَّت (PWA). لا علاقة لهذا بزر التحديث ولا بجلسة الدخول.
+(function () {
+  var startY = 0, blocking = false;
+  document.addEventListener("touchstart", function (e) {
+    if (e.touches.length !== 1) return;
+    startY = e.touches[0].clientY;
+    // نمنع السحب فقط إذا كانت الصفحة بالفعل في أعلى نقطة تمرير لها
+    blocking = window.scrollY <= 0 && document.documentElement.scrollTop <= 0;
+  }, { passive: true });
+  document.addEventListener("touchmove", function (e) {
+    if (!blocking || e.touches.length !== 1) return;
+    var dy = e.touches[0].clientY - startY;
+    // سحب لأسفل وأنت في القمة أصلاً = محاولة تحديث بالسحب: نمنعها
+    if (dy > 0 && window.scrollY <= 0 && document.documentElement.scrollTop <= 0) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+})();
+</script>
 
 <script>
 // تأكد من وضع الرابط الجديد للـ Web App هنا
-const API_URL = "https://script.google.com/macros/s/AKfycbx-36zpcxd2A-8zsLkQdeTtZ837W7_9_q3wogdRsAPCC1pYlKo3UtOqtPGUuWPv8FhWtA/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbzy0uN73LG_SB9FWMKn2R_nFjHpeYWXj4LmtILXk-wXN7TBtw8EwXRnL5iP3k_MFrKT0g/exec";
 
 let session = null;
 let currentChildIndex = 0;
@@ -448,6 +491,7 @@ function renderLogin(errorMsg) {
       <div class="school-name">مدرسة مسار للتميز</div>
       <div class="school-sub">بوابة أولياء الأمور</div>
     </div>
+    ${installBannerHtml()}
     <form id="loginForm">
       <label>اسم المستخدم (آخر 6 أرقام من هاتفك)</label>
       <div class="field">
@@ -478,6 +522,7 @@ function renderLogin(errorMsg) {
     try {
       const result = await doLogin(phone, pw, remember);
       if (!result.ok) { renderLogin(result.error || "حدث خطأ، حاول مرة أخرى"); return; }
+      hapticSuccess();
       if (!remember) clearCreds();
       showAnnouncements = (session.announcements || []).length > 0;
       renderApp();
@@ -1050,10 +1095,15 @@ function renderMore(child) {
     });
   }
 
-  return accSection("info", "🧒", "بيانات الطالب", "", infoBody) +
-         accSection("exams", "📅", "الامتحانات القادمة", upcomingCount ? String(upcomingCount) : "", examsBody) +
-         accSection("notes", "📝", "ملاحظات المعلمين", notes.length ? String(notes.length) : "", notesBody) +
-         accSection("honor", "🏆", "لوحة تكريم الأوائل", "", honorBody) +
+  // أي قسم من الأربعة أخفته الإدارة عبر «⚙️ ميزات الصفحة» لا يُعرض إطلاقاً؛ «إعدادات العرض» تبقى ثابتة دوماً
+  const hiddenParentTabs = getHiddenParentTabs();
+  const sections = [
+    ["info", "🧒", "بيانات الطالب", "", infoBody],
+    ["exams", "📅", "الامتحانات القادمة", upcomingCount ? String(upcomingCount) : "", examsBody],
+    ["notes", "📝", "ملاحظات المعلمين", notes.length ? String(notes.length) : "", notesBody],
+    ["honor", "🏆", "لوحة تكريم الأوائل", "", honorBody],
+  ];
+  return sections.filter(([id]) => !hiddenParentTabs.has(id)).map((args) => accSection(...args)).join("") +
          accSection("view", "⚙️", "إعدادات العرض", "", settingsBody());
 }
 
@@ -1395,7 +1445,76 @@ function busRowHtml(c) {
   } else if (c.bus.hasUrlConfigured && !c.bus.trackingActive) {
     action = `<span class="bus-note">التتبع خلال الدوام فقط</span>`;
   }
-  return `<div class="kid-bus"><span>🚌 مشرف الباص: <b>${name}</b></span>${action}</div>`;
+  // الخريطة الحية الجديدة (بجانب رابط خرائط غوغل القديم إن وُجد — الاثنان معاً)
+  let liveBtn = "";
+  if (c.liveTrip && c.liveTrip.active && c.Supervisor_ID) {
+    liveBtn = `<button type="button" class="live-track-btn" onclick="event.stopPropagation(); openLiveMap('${esc(c.Supervisor_ID)}','${esc(name)}')"><span class="dot"></span> خريطة حية</button>`;
+  }
+  return `<div class="kid-bus"><span>🚌 مشرف الباص: <b>${name}</b></span><span style="display:flex;gap:6px;align-items:center;">${liveBtn}${action}</span></div>`;
+}
+
+// ---------- الخريطة الحية (تتبع مباشر من تطبيق المشرفة) ----------
+let liveMapInstance = null;
+let liveMapMarker = null;
+let liveMapPollTimer = null;
+let liveMapSupervisorId = null;
+
+function openLiveMap(supervisorId, supervisorName) {
+  liveMapSupervisorId = supervisorId;
+  const overlay = document.createElement("div");
+  overlay.className = "live-map-overlay";
+  overlay.id = "liveMapOverlay";
+  overlay.innerHTML = `
+    <div class="live-map-sheet">
+      <div class="live-map-head">
+        <div class="live-map-title">🚌 <span>${esc(supervisorName)}</span></div>
+        <button type="button" class="live-map-close" onclick="closeLiveMap()">✕</button>
+      </div>
+      <div id="liveMapEl"></div>
+      <div class="live-map-status" id="liveMapStatus">جارِ تحديد الموقع…</div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  liveMapInstance = L.map("liveMapEl", { zoomControl: true, attributionControl: false }).setView([0, 0], 15);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(liveMapInstance);
+  const busIcon = L.divIcon({ html: "🚌", className: "", iconSize: [30, 30] });
+  liveMapMarker = L.marker([0, 0], { icon: busIcon });
+
+  pollLiveMap();
+  liveMapPollTimer = setInterval(pollLiveMap, 15000);
+}
+
+async function pollLiveMap() {
+  const statusEl = document.getElementById("liveMapStatus");
+  if (!liveMapSupervisorId) return;
+  try {
+    const res = await fetch(`${API_URL}?action=getLiveTrip&supervisorId=${encodeURIComponent(liveMapSupervisorId)}`);
+    const data = await res.json();
+    if (!data.ok || !data.active) {
+      if (statusEl) statusEl.textContent = "انتهت الرحلة";
+      clearInterval(liveMapPollTimer);
+      return;
+    }
+    if (data.lat !== null && data.lng !== null && data.lat !== undefined && data.lng !== undefined) {
+      liveMapInstance.setView([data.lat, data.lng], liveMapInstance.getZoom() < 14 ? 16 : liveMapInstance.getZoom());
+      liveMapMarker.setLatLng([data.lat, data.lng]).addTo(liveMapInstance);
+      const ageSec = data.ts ? Math.round((Date.now() - data.ts) / 1000) : null;
+      if (statusEl) statusEl.textContent = ageSec !== null ? `آخر تحديث قبل ${ageSec} ثانية` : "تم تحديد الموقع";
+    } else {
+      if (statusEl) statusEl.textContent = "الرحلة بدأت، بانتظار أول إشارة موقع…";
+    }
+  } catch (err) {
+    if (statusEl) statusEl.textContent = "تعذر تحديث الموقع";
+  }
+}
+
+function closeLiveMap() {
+  if (liveMapPollTimer) clearInterval(liveMapPollTimer);
+  liveMapPollTimer = null;
+  liveMapSupervisorId = null;
+  if (liveMapInstance) { liveMapInstance.remove(); liveMapInstance = null; liveMapMarker = null; }
+  const overlay = document.getElementById("liveMapOverlay");
+  if (overlay) overlay.remove();
 }
 
 // ---------- قائمة الطفل القابلة للفتح (الرئيسية) ----------
@@ -1806,10 +1925,42 @@ function setFontPref(k) {
   applyFontPref();
   rerenderCurrent();
 }
+// اهتزاز خفيف قصير عند نجاح إجراء يقوم به المستخدم صراحة (دخول، تفعيل إشعارات).
+// لا يُستدعى أبداً من التحديث التلقائي الصامت بالخلفية، حتى لا يهتز الجهاز بلا سبب ظاهر للمستخدم.
+function hapticSuccess() {
+  try { if (navigator.vibrate) navigator.vibrate(35); } catch (e) {}
+}
+
+function installStatusRowHtml() {
+  const installed = isStandalone();
+  const plat = installPlatform();
+  let action;
+  if (installed) {
+    action = `<span class="install-badge ok">✅ مثبّت</span>`;
+  } else if (deferredInstallPrompt) {
+    action = `<button type="button" class="ib main" style="padding:7px 16px;" onclick="installApp()">تثبيت الآن</button>`;
+  } else if (plat === "ios") {
+    action = `<button type="button" class="ib" style="padding:7px 16px;" onclick="alert('اضغط زر المشاركة ⬆️ أسفل المتصفح في Safari، ثم اختر «إضافة إلى الشاشة الرئيسية».')">كيف أثبّته؟</button>`;
+  } else if (plat === "android") {
+    action = `<button type="button" class="ib" style="padding:7px 16px;" onclick="alert('افتح قائمة المتصفح ⋮ ثم اختر «تثبيت التطبيق» أو «إضافة إلى الشاشة الرئيسية».')">كيف أثبّته؟</button>`;
+  } else {
+    action = `<span class="install-badge">غير متاح على هذا المتصفح</span>`;
+  }
+  return `
+    <div class="set-row">
+      <div class="set-lab">التطبيق</div>
+      <div class="install-row">
+        <span class="install-state ${installed ? "ok" : ""}">${installed ? "مثبّت على جهازك" : "غير مثبّت بعد"}</span>
+        ${action}
+      </div>
+    </div>`;
+}
+
 function settingsBody() {
   const f = getFontPref(), t = getThemePref();
   const seg = (items, cur, fn) => `<div class="seg">${items.map(([k, lab]) => `<button type="button" class="seg-b ${k === cur ? "on" : ""}" onclick="${fn}('${k}')">${lab}</button>`).join("")}</div>`;
   return `
+    ${installStatusRowHtml()}
     <div class="set-row"><div class="set-lab">حجم الخط</div>
       ${seg([["n", "عادي"], ["l", "كبير"], ["xl", "أكبر"]], f, "setFontPref")}</div>
     <div class="set-row"><div class="set-lab">المظهر</div>
@@ -1914,8 +2065,10 @@ function installHiddenUntil() {
   try { return Number(localStorage.getItem("masar_install_hide") || 0); } catch (e) { return 0; }
 }
 function installBannerHtml() {
-  if (isStandalone() || installPlatform() === "other" || Date.now() < installHiddenUntil()) return "";
+  if (isStandalone() || Date.now() < installHiddenUntil()) return "";
   const plat = installPlatform();
+  // نُخفي البانر فقط على متصفح كمبيوتر لا يدعم التثبيت إطلاقاً (لا نافذة تثبيت ولا نظام جوال معروف)
+  if (plat === "other" && !deferredInstallPrompt) return "";
   const how = plat === "ios"
     ? "اضغط زر المشاركة <b>⬆️</b> بأسفل المتصفح، ثم اختر «إضافة إلى الشاشة الرئيسية»."
     : (deferredInstallPrompt ? "" : "افتح قائمة المتصفح <b>⋮</b> ثم اختر «تثبيت التطبيق».");
@@ -1926,7 +2079,7 @@ function installBannerHtml() {
       ${how ? `<div class="install-how">${how}</div>` : ""}
       <div class="install-btns">
         ${deferredInstallPrompt ? `<button type="button" class="ib main" onclick="installApp()">تثبيت الآن</button>` : ""}
-        <button type="button" class="ib" onclick="hideInstall(7)">ليس الآن</button>
+        <button type="button" class="ib" onclick="hideInstall(3)">ليس الآن</button>
         <button type="button" class="ib" onclick="hideInstall(36500)">لا تذكّرني</button>
       </div>
     </div>`;
@@ -1945,7 +2098,12 @@ async function installApp() {
   deferredInstallPrompt = null;
   if (session) renderApp();
 }
-window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); deferredInstallPrompt = e; if (session) renderApp(); });
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  if (session) renderApp();
+  else if (document.getElementById("loginForm")) renderLogin();
+});
 window.addEventListener("appinstalled", () => {
   try { localStorage.setItem("masar_install_hide", String(Date.now() + 36500 * 86400000)); } catch (e) {}
   deferredInstallPrompt = null;
@@ -2032,11 +2190,26 @@ function toggleTaskDone(key) {
   renderApp();
 }
 
+// ⚙️ ميزات الصفحة (تُضبط من صفحة الإدارة، Owner فقط) — أي قسم أخفته الإدارة يختفي هنا تلقائياً.
+// «الرئيسية» و«إعدادات العرض» ثابتتان دوماً وليستا ضمن هذا الإخفاء.
+function getHiddenParentTabs() {
+  return new Set(String((session && session.hiddenTabs) || "").split(",").map((x) => x.trim()).filter(Boolean));
+}
+
 function renderApp() {
   const activeId = document.activeElement ? document.activeElement.id : null;
   const prevScroll = window.scrollY || 0;
   const app = document.getElementById("app");
-  const TABS = ["home", "results", "assignments", "attendance", "more"];
+  const hiddenParentTabs = getHiddenParentTabs();
+  const TAB_DEFS = [
+    { id: "home", label: "الرئيسية" },
+    { id: "results", label: "النتائج" },
+    { id: "assignments", label: "الوظائف" },
+    { id: "attendance", label: "الحضور" },
+    { id: "more", label: "المزيد" }, // تبقى ظاهرة دوماً لاحتوائها «إعدادات العرض» الثابتة دائماً
+  ];
+  const visibleTabDefs = TAB_DEFS.filter((t) => t.id === "home" || t.id === "more" || !hiddenParentTabs.has(t.id));
+  const TABS = visibleTabDefs.map((t) => t.id);
   if (TABS.indexOf(currentTab) === -1) currentTab = "home";
   if (currentChildIndex >= session.children.length) currentChildIndex = 0;
   const child = session.children[currentChildIndex] || null;
@@ -2069,6 +2242,13 @@ function renderApp() {
 
   const tabBtn = (id, label, badge) =>
     `<button class="tab-btn ${currentTab === id ? "active" : ""}" data-tab="${id}">${badge ? '<span class="badge-dot"></span>' : ""}${TAB_ICONS[id] || ""}<span>${label}</span></button>`;
+  const tabBtns = {
+    home: tabBtn("home", "الرئيسية", false),
+    results: tabBtn("results", "النتائج", showBadgeResults),
+    assignments: tabBtn("assignments", "الوظائف", showBadgeAssign),
+    attendance: tabBtn("attendance", "الحضور", false),
+    more: tabBtn("more", "المزيد", showBadgeMore),
+  };
 
   app.innerHTML = `
     <div class="header">
@@ -2099,11 +2279,7 @@ function renderApp() {
     </div>
 
     <div class="tabbar">
-      ${tabBtn("home", "الرئيسية", false)}
-      ${tabBtn("results", "النتائج", showBadgeResults)}
-      ${tabBtn("assignments", "الوظائف", showBadgeAssign)}
-      ${tabBtn("attendance", "الحضور", false)}
-      ${tabBtn("more", "المزيد", showBadgeMore)}
+      ${visibleTabDefs.map((t) => tabBtns[t.id]).join("")}
     </div>
     ${renderAnnouncementsModal()}
     ${renderPaymentsModal()}
@@ -2247,7 +2423,7 @@ function requestPushPermission() {
   if (!oneSignalAppId) { alert("لم تُفعَّل ميزة الإشعارات بعد من قبل إدارة المدرسة"); return; }
   window.OneSignalDeferred = window.OneSignalDeferred || [];
   window.OneSignalDeferred.push(function (OneSignal) {
-    OneSignal.Notifications.requestPermission().catch((e) => console.error("OneSignal permission failed:", e));
+    OneSignal.Notifications.requestPermission().then(() => hapticSuccess()).catch((e) => console.error("OneSignal permission failed:", e));
   });
 }
 

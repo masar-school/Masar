@@ -408,7 +408,7 @@
 </script>
 
 <script>
-const API_URL = "https://script.google.com/macros/s/AKfycbwwMygFTCTVBAt1aVzFWUReJLBxgUQldBcuVqBIIvLvIVLuHgKUgh3A1fBlof3mwgMgaA/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbzy0uN73LG_SB9FWMKn2R_nFjHpeYWXj4LmtILXk-wXN7TBtw8EwXRnL5iP3k_MFrKT0g/exec";
 
 const SUBJECTS = ["لغة عربية", "لغة إنجليزية", "رياضيات", "علوم", "تربية إسلامية", "دراسات اجتماعية", "حاسب آلي", "تربية فنية", "تربية بدنية", "عام"];
 const EXAM_TYPES = ["المذاكرة الأولى", "المذاكرة الثانية", "الامتحان النهائي للفصل"];
@@ -2736,7 +2736,9 @@ function renderAdminBusTab() {
         <div class="form-field"><label>الاسم</label><input id="newSupName" required /></div>
         <div class="form-field"><label>الهاتف</label><input id="newSupPhone" /></div>
         <div class="form-field"><label>منطقة الخط</label><input id="newSupRoute" /></div>
-        <div class="form-field"><label>رابط تتبع GPS (اختياري)</label><input id="newSupUrl" /></div>
+        <div class="form-field"><label>رابط تتبع GPS (اختياري — احتياطي قديم)</label><input id="newSupUrl" /></div>
+        <div class="form-field"><label>اسم المستخدم (لتطبيق التتبع الحي)</label><input id="newSupUsername" /></div>
+        <div class="form-field"><label>كلمة السر (لتطبيق التتبع الحي)</label><input id="newSupPassword" /></div>
         <button type="submit" class="btn-save" id="addSupervisorBtn">إضافة المشرف</button>
         ${addSupervisorMsg}
       </form>
@@ -2770,8 +2772,16 @@ function renderAdminBusTab() {
           <input id="supRoute_${s.Supervisor_ID}" value="${s.Route_Area || ""}" />
         </div>
         <div class="form-field" style="margin-bottom:8px;">
-          <label>رابط تتبع GPS</label>
+          <label>رابط تتبع GPS (احتياطي قديم)</label>
           <input id="supUrl_${s.Supervisor_ID}" value="${s.Live_Location_URL || ""}" placeholder="رابط تتبع GPS" />
+        </div>
+        <div class="form-field" style="margin-bottom:8px;">
+          <label>اسم المستخدم (تطبيق التتبع الحي)</label>
+          <input id="supUsername_${s.Supervisor_ID}" value="${s.Username || ""}" />
+        </div>
+        <div class="form-field" style="margin-bottom:8px;">
+          <label>كلمة السر (تطبيق التتبع الحي)</label>
+          <input id="supPassword_${s.Supervisor_ID}" value="${s.Password || ""}" />
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
           <button class="status-pill status-active" onclick="saveSupervisor('${s.Supervisor_ID}')">حفظ التعديلات</button>
@@ -2811,7 +2821,9 @@ async function submitAddSupervisor(e) {
     Supervisor_Name: supName,
     Phone: document.getElementById("newSupPhone").value.trim(),
     Route_Area: document.getElementById("newSupRoute").value.trim(),
-    Live_Location_URL: document.getElementById("newSupUrl").value.trim()
+    Live_Location_URL: document.getElementById("newSupUrl").value.trim(),
+    Username: document.getElementById("newSupUsername").value.trim(),
+    Password: document.getElementById("newSupPassword").value.trim()
   };
 
   try {
@@ -2849,7 +2861,9 @@ async function saveSupervisor(supervisorId) {
     Supervisor_Name: newName,
     Phone: document.getElementById("supPhone_" + supervisorId).value.trim(),
     Route_Area: document.getElementById("supRoute_" + supervisorId).value.trim(),
-    Live_Location_URL: document.getElementById("supUrl_" + supervisorId).value.trim()
+    Live_Location_URL: document.getElementById("supUrl_" + supervisorId).value.trim(),
+    Username: document.getElementById("supUsername_" + supervisorId).value.trim(),
+    Password: document.getElementById("supPassword_" + supervisorId).value.trim()
   };
   try {
     const res = await fetch(API_URL, { method: "POST", body: JSON.stringify(payload) });
@@ -4074,6 +4088,12 @@ const TEACHER_HIDEABLE_TABS = [
   { id: "attendanceSearch", label: "سجل الحضور" }, { id: "behavior", label: "السلوك" },
   { id: "announcements", label: "الإعلانات" }, { id: "ranking", label: "الترتيب" },
 ];
+// تبويبات بوابة الأهالي (index.html) القابلة للإخفاء. «الرئيسية» و«إعدادات العرض» ثابتتان دوماً وليستا هنا.
+const PARENT_HIDEABLE_TABS = [
+  { id: "results", label: "النتائج" }, { id: "assignments", label: "الوظائف" }, { id: "attendance", label: "الحضور" },
+  { id: "info", label: "بيانات الطالب (بالمزيد)" }, { id: "exams", label: "الامتحانات القادمة (بالمزيد)" },
+  { id: "notes", label: "ملاحظات المعلمين (بالمزيد)" }, { id: "honor", label: "لوحة تكريم الأوائل (بالمزيد)" },
+];
 
 function parseHiddenIds(settingKey) {
   return new Set(getSettingValue(settingKey).split(",").map((x) => x.trim()).filter(Boolean));
@@ -4089,11 +4109,16 @@ function isAdminGroupVisible(groupId, hidden) {
 }
 
 let pageFeaturesMsg = "";
+const PAGE_FEATURES_KINDS = {
+  admin: { listSel: "#adminHideList input:checked", key: "Hidden_Admin_Tabs", btnId: "saveAdminHideBtn" },
+  teacher: { listSel: "#teacherHideList input:checked", key: "Hidden_Teacher_Tabs", btnId: "saveTeacherHideBtn" },
+  parent: { listSel: "#parentHideList input:checked", key: "Hidden_Parent_Tabs", btnId: "saveParentHideBtn" },
+};
 async function submitPageFeatures(kind) {
-  const listSel = kind === "admin" ? "#adminHideList input:checked" : "#teacherHideList input:checked";
-  const hiddenIds = Array.from(document.querySelectorAll(listSel)).map((cb) => cb.value);
-  const key = kind === "admin" ? "Hidden_Admin_Tabs" : "Hidden_Teacher_Tabs";
-  const btn = document.getElementById(kind === "admin" ? "saveAdminHideBtn" : "saveTeacherHideBtn");
+  const cfg = PAGE_FEATURES_KINDS[kind];
+  const hiddenIds = Array.from(document.querySelectorAll(cfg.listSel)).map((cb) => cb.value);
+  const key = cfg.key;
+  const btn = document.getElementById(cfg.btnId);
   if (btn) { btn.disabled = true; btn.textContent = "جارِ الحفظ..."; }
   try {
     const value = hiddenIds.join(",");
@@ -4120,7 +4145,7 @@ function toggleHideGroupAll(groupBoxId, checked) {
 
 function renderPageFeaturesTab() {
   if (!isOwner()) return emptyState("🔒", "هذا القسم خاص بمطوّر الصفحة فقط", "");
-  const hiddenA = getHiddenAdminTabs(), hiddenT = getHiddenTeacherTabs();
+  const hiddenA = getHiddenAdminTabs(), hiddenT = getHiddenTeacherTabs(), hiddenP = parseHiddenIds("Hidden_Parent_Tabs");
 
   const adminHtml = ADMIN_HIDEABLE_GROUPS.map((g) => {
     const boxId = "hg_" + g.id;
@@ -4144,6 +4169,13 @@ function renderPageFeaturesTab() {
       `).join("")}
     </div>`;
 
+  const parentHtml = `
+    <div class="pf-group" id="hg_parent">
+      ${PARENT_HIDEABLE_TABS.map((t) => `
+        <label class="pf-item"><input type="checkbox" value="${t.id}" ${hiddenP.has(t.id) ? "checked" : ""} /><span>${t.label}</span></label>
+      `).join("")}
+    </div>`;
+
   return `
     <div class="form-card">
       <div class="section-title">⚙️ ميزات الصفحة</div>
@@ -4157,6 +4189,9 @@ function renderPageFeaturesTab() {
       <div class="pf-sec" style="margin-top:22px;">👩‍🏫 قوائم المعلم</div>
       <div id="teacherHideList">${teacherHtml}</div>
       <button type="button" class="btn-save" id="saveTeacherHideBtn" onclick="submitPageFeatures('teacher')">حفظ قوائم المعلم</button>
+      <div class="pf-sec" style="margin-top:22px;">👪 قوائم الأهالي</div>
+      <div id="parentHideList">${parentHtml}</div>
+      <button type="button" class="btn-save" id="saveParentHideBtn" onclick="submitPageFeatures('parent')">حفظ قوائم الأهالي</button>
       ${pageFeaturesMsg}
     </div>`;
 }
