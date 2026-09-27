@@ -1,8 +1,0 @@
-[{
-  "relation": ["delegate_permission/common.handle_all_urls"],
-  "target": {
-    "namespace": "android_app",
-    "package_name": "io.github.masar_school.twa",
-    "sha256_cert_fingerprints": ["C2:B2:B4:3F:AD:0D:E0:6C:9D:37:62:A3:A5:9A:15:21:EF:24:A6:45:99:5A:23:CD:BA:5F:08:C0:14:45:F7:45"]
-  }
-}]
