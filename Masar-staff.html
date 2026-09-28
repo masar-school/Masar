@@ -394,6 +394,8 @@
   .fleet-legend-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
   .fleet-my-loc-btn { position: absolute; bottom: 14px; left: 14px; z-index: 1100; background: var(--card); border: 1px solid var(--border); border-radius: 50%; width: 42px; height: 42px; font-size: 18px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); cursor: pointer; }
   .fleet-map-body-wrap { position: relative; flex: 1; min-height: 0; }
+  .fleet-trail-btn { position: absolute; bottom: 14px; left: 64px; z-index: 1100; background: var(--card); border: 1px solid var(--border); border-radius: 50%; width: 42px; height: 42px; font-size: 18px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); cursor: pointer; }
+  .fleet-trail-btn.off { opacity: 0.45; }
   .bus-name-tooltip { background: var(--header, #16233F); color: #fff; border: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; box-shadow: none; }
   .bus-name-tooltip::before { display: none; }
   .seen-line { font-size: 9.5px; font-weight: 500; }
@@ -2884,6 +2886,52 @@ function seenInfo(ts, offset) {
   return { text, level };
 }
 
+let fleetTrailLayer = null;    // طبقة خطوط المسار
+let fleetTrailLines = {};      // Supervisor_ID -> خط المسار
+let fleetTrailPts = {};        // Supervisor_ID -> نقاط المسار [[lat,lng],...]
+let fleetTrailReady = false;   // صارت النقاط المخزّنة بالسيرفر محمّلة؟
+const TRAIL_MIN_DIST_M = 15;
+
+function trailVisiblePref() { try { return localStorage.getItem("masar_trail_visible") !== "0"; } catch (e) { return true; } }
+function trailSavePref(v) { try { localStorage.setItem("masar_trail_visible", v ? "1" : "0"); } catch (e) {} }
+
+function fleetApplyTrailVisibility() {
+  if (!fleetMapInstance || !fleetTrailLayer) return;
+  const on = trailVisiblePref();
+  if (on) { if (!fleetMapInstance.hasLayer(fleetTrailLayer)) fleetTrailLayer.addTo(fleetMapInstance); }
+  else fleetMapInstance.removeLayer(fleetTrailLayer);
+  const btn = document.getElementById("fleetTrailBtn");
+  if (btn) btn.classList.toggle("off", !on);
+}
+function fleetToggleTrails() { trailSavePref(!trailVisiblePref()); fleetApplyTrailVisibility(); }
+
+function fleetDrawTrail(id) {
+  if (!fleetTrailLayer) return;
+  const pts = fleetTrailPts[id] || [];
+  if (fleetTrailLines[id]) fleetTrailLines[id].setLatLngs(pts);
+  else fleetTrailLines[id] = L.polyline(pts, { color: fleetColorFor(id), weight: 4, opacity: 0.75 }).addTo(fleetTrailLayer);
+}
+// المسار المخزّن بالسيرفر (من بداية الرحلة) — عبر Apps Script بعد التحقق من حساب الإدارة
+async function fleetLoadTrails() {
+  try {
+    const url = `${API_URL}?action=getTrails&kind=staff&username=${encodeURIComponent(staffSession.username)}&password=${encodeURIComponent(staffSession._password)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!fleetMapInstance) return;               // أُغلقت الخريطة أثناء الجلب
+    if (data.ok) Object.keys(data.trails || {}).forEach((id) => { fleetTrailPts[id] = data.trails[id]; fleetDrawTrail(id); });
+  } catch (err) { /* بدون مسار — الخريطة تشتغل عادي */ }
+  fleetTrailReady = true;
+}
+// كل نقطة حية جديدة تنضاف للخط محلياً (بدون طلب إضافي للسيرفر)
+function fleetAppendTrailPoint(id, lat, lng) {
+  if (!fleetTrailReady || !fleetMapInstance) return;
+  const pts = fleetTrailPts[id] || (fleetTrailPts[id] = []);
+  const last = pts[pts.length - 1];
+  if (last && fleetMapInstance.distance(last, [lat, lng]) < TRAIL_MIN_DIST_M) return;
+  pts.push([lat, lng]);
+  fleetDrawTrail(id);
+}
+
 let fleetTrips = {};          // Supervisor_ID -> بيانات الرحلة النشطة الأخيرة من Firebase
 let fleetTimeOffset = 0;
 let fleetOffsetRef = null;
@@ -2926,6 +2974,7 @@ function openFleetMap() {
       <div class="fleet-map-body-wrap">
         <div id="fleetMapEl"></div>
         <button type="button" class="fleet-my-loc-btn" onclick="fleetShowMyLocation()" title="موقعي">📍</button>
+        <button type="button" class="fleet-trail-btn" id="fleetTrailBtn" onclick="fleetToggleTrails()" title="إظهار / إخفاء مسار الباصات">〰️</button>
       </div>
       <div class="fleet-map-legend" id="fleetLegend"></div>
     </div>`;
@@ -2935,7 +2984,11 @@ function openFleetMap() {
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(fleetMapInstance);
   fleetMarkers = {};
   fleetAutoFit = true;
-  fleetMapInstance.on("dragstart", () => { fleetAutoFit = false; });   // لمّا المدير يحرّك الخريطة بإيده، نبطّل نسحبها
+  fleetMapInstance.on("dragstart", () => { fleetAutoFit = false; });
+  fleetTrailLayer = L.layerGroup();
+  fleetTrailLines = {}; fleetTrailPts = {}; fleetTrailReady = false;
+  fleetApplyTrailVisibility();
+  fleetLoadTrails();   // لمّا المدير يحرّك الخريطة بإيده، نبطّل نسحبها
 
   // فرق التوقيت بين ساعة الجهاز وساعة Firebase — حتى لا يظهر "آخر ظهور" غلط لو ساعة الجوال مضبوطة غلط
   fleetOffsetRef = firebase.database().ref(".info/serverTimeOffset");
@@ -2953,6 +3006,7 @@ function openFleetMap() {
       fleetTrips[supId] = trip;
       if (trip.lat === null || trip.lat === undefined || trip.lng === null || trip.lng === undefined) return;
       anyPoint = true;
+      fleetAppendTrailPoint(supId, trip.lat, trip.lng);
       if (!fleetMarkers[supId]) {
         fleetMarkers[supId] = L.marker([trip.lat, trip.lng], { icon: fleetBusIcon(fleetColorFor(supId)) })
           .bindTooltip(fleetTipHtml(supId), { permanent: true, direction: "top", className: "bus-name-tooltip", offset: [0, -14] })
@@ -2965,6 +3019,9 @@ function openFleetMap() {
     // إزالة أي علامة لمشرفة انتهت رحلتها
     Object.keys(fleetMarkers).forEach((supId) => {
       if (!fleetTrips[supId]) { fleetMapInstance.removeLayer(fleetMarkers[supId]); delete fleetMarkers[supId]; }
+    });
+    Object.keys(fleetTrailLines).forEach((supId) => {
+      if (!fleetTrips[supId]) { fleetTrailLayer.removeLayer(fleetTrailLines[supId]); delete fleetTrailLines[supId]; delete fleetTrailPts[supId]; }
     });
 
     fleetRefreshSeen();
@@ -3018,6 +3075,7 @@ function closeFleetMap() {
   if (fleetOffsetRef) { fleetOffsetRef.off(); fleetOffsetRef = null; }
   if (fleetSeenTimer) { clearInterval(fleetSeenTimer); fleetSeenTimer = null; }
   fleetTrips = {};
+  fleetTrailLayer = null; fleetTrailLines = {}; fleetTrailPts = {}; fleetTrailReady = false;
   if (fleetMyLocWatchId !== null) { navigator.geolocation.clearWatch(fleetMyLocWatchId); fleetMyLocWatchId = null; }
   fleetMyLocMarker = null;
   if (fleetMapInstance) { fleetMapInstance.remove(); fleetMapInstance = null; }

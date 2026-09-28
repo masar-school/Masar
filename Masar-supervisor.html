@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>مسار - تتبع الباص</title>
 <link rel="manifest" href="manifest-supervisor.json">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 <meta name="theme-color" content="#16233F">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -88,6 +92,23 @@
   .tab-btn.active { color: #fff; font-weight: 700; background: var(--header); }
   body.dark .tab-btn.active { color: var(--header); background: var(--gold); }
   .tab-btn span.ic { font-size: 17px; }
+
+  .fleet-wrap { position: relative; height: calc(100vh - 330px); min-height: 300px; border-radius: 16px; overflow: hidden; border: 1px solid var(--border); }
+  #fleetMapEl { position: absolute; inset: 0; }
+  .fleet-btn { position: absolute; bottom: 12px; z-index: 1100; background: var(--card); border: 1px solid var(--border); border-radius: 50%; width: 42px; height: 42px; font-size: 18px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); cursor: pointer; }
+  .fleet-btn.off { opacity: 0.45; }
+  .fleet-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .fleet-legend-chip { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 5px 11px; }
+  .fleet-legend-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .bus-name-tooltip { background: var(--header); color: #fff; border: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; box-shadow: none; }
+  .bus-name-tooltip::before { display: none; }
+  .seen-line { font-size: 9.5px; font-weight: 500; }
+  .seen-ok, .seen-wait { color: var(--muted); }
+  .seen-late { color: #E67E22; font-weight: 700; }
+  .seen-lost { color: #D32F2F; font-weight: 700; }
+  .bus-name-tooltip .seen-ok, .bus-name-tooltip .seen-wait { color: #CFD6E4; }
+  .bus-name-tooltip .seen-late { color: #FFB74D; }
+  .bus-name-tooltip .seen-lost { color: #FF8A80; }
 </style>
 </head>
 <body>
@@ -96,6 +117,9 @@
 <script>
 // ⚠️ نفس رابط Web App الموجود بأعلى index.html وMasar-staff.html — يُحدَّث بالثلاثة معاً دائماً
 const API_URL = "https://script.google.com/macros/s/AKfycbzOiLsX7Gu5grOolZoMuQby_b505Hz1fKP7qaUvGTTpVhk1QwHaDMV2L68KxLTozOk7hw/exec";
+
+const FIREBASE_DB_URL = "https://masar-tracking-21339-default-rtdb.europe-west1.firebasedatabase.app";
+if (!firebase.apps.length) firebase.initializeApp({ databaseURL: FIREBASE_DB_URL });
 
 let session = null;       // { Supervisor_ID, Supervisor_Name, username, password, students, activeTrip }
 let activeTab = "trip";
@@ -197,10 +221,12 @@ async function loadStats() {
 
 // ---------- العرض ----------
 function render() {
+  teardownFleetMap();   // الخريطة مرتبطة بعنصر HTML بينمسح عند إعادة الرسم
   const app = document.getElementById("app");
   if (!session) { app.innerHTML = renderLogin(); attachLoginEvents(); return; }
   app.innerHTML = renderMain();
   attachMainEvents();
+  if (activeTab === "fleet") initFleetMap();
 }
 
 function renderLogin() {
@@ -242,11 +268,13 @@ function renderMain() {
     </div>
     <div class="content">
       ${activeTab === "trip" ? renderTripTab() : ""}
+      ${activeTab === "fleet" ? renderFleetTab() : ""}
       ${activeTab === "students" ? renderStudentsTab() : ""}
       ${activeTab === "stats" ? renderStatsTab() : ""}
     </div>
     <div class="tabbar">
       <button class="tab-btn ${activeTab === "trip" ? "active" : ""}" data-tab="trip"><span class="ic">🚌</span>الرحلة</button>
+      <button class="tab-btn ${activeTab === "fleet" ? "active" : ""}" data-tab="fleet"><span class="ic">🗺️</span>الباصات</button>
       <button class="tab-btn ${activeTab === "students" ? "active" : ""}" data-tab="students"><span class="ic">👦</span>طلابي</button>
       <button class="tab-btn ${activeTab === "stats" ? "active" : ""}" data-tab="stats"><span class="ic">📊</span>إحصائياتي</button>
     </div>
@@ -333,6 +361,175 @@ function attachMainEvents() {
   document.querySelectorAll(".chip").forEach(chip => {
     chip.addEventListener("click", () => { classFilter = chip.dataset.class; render(); });
   });
+}
+
+// ---------- خريطة كل الباصات (المشرفة تشوف باقي الباصات + المسار) ----------
+const FLEET_COLORS = ["#E74C3C", "#3498DB", "#2ECC71", "#F39C12", "#9B59B6", "#1ABC9C", "#E67E22", "#34495E", "#D35400", "#16A085"];
+const TRAIL_MIN_DIST_M = 15;
+function fleetColorFor(id) {
+  let h = 0; const t = String(id || "");
+  for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0;
+  return FLEET_COLORS[h % FLEET_COLORS.length];
+}
+// نص "آخر ظهور" النسبي + مستوى اللون (ok / late / lost). offset = فرق ساعة Firebase عن ساعة الجهاز
+function seenInfo(ts, offset) {
+  if (!ts) return { text: "—", level: "ok" };
+  const age = Math.max(0, Math.round((Date.now() + (offset || 0) - ts) / 1000));
+  let text;
+  if (age < 15) text = "الآن";
+  else if (age < 60) text = `قبل ${age} ث`;
+  else if (age < 3600) text = `قبل ${Math.floor(age / 60)} د`;
+  else text = `قبل ${Math.floor(age / 3600)} ساعة`;
+  let level = "ok";
+  if (age > 300) { level = "lost"; text += " · منقطع"; }
+  else if (age > 150) { level = "late"; text += " · متأخر"; }
+  return { text, level };
+}
+
+let fleetMap = null, fleetMarkers = {}, fleetTrips = {}, fleetDbRef = null, fleetOffsetRef = null;
+let fleetTimeOffset = 0, fleetSeenTimer = null, fleetAutoFit = true;
+let fleetTrailLayer = null, fleetTrailLines = {}, fleetTrailPts = {}, fleetTrailReady = false;
+
+function trailVisiblePref() { try { return localStorage.getItem("masar_trail_visible") !== "0"; } catch (e) { return true; } }
+function trailSavePref(v) { try { localStorage.setItem("masar_trail_visible", v ? "1" : "0"); } catch (e) {} }
+
+function fleetIsMine(id) { return session && String(id).trim() === String(session.Supervisor_ID).trim(); }
+function fleetName(id) { const t = fleetTrips[id]; return (t && t.name) ? t.name : String(id); }
+function fleetBusIcon(color, mine) {
+  const ring = mine ? "border:3px solid #fff;box-shadow:0 0 0 2px " + color + ",0 2px 6px rgba(0,0,0,0.5);" : "box-shadow:0 1px 4px rgba(0,0,0,0.4);";
+  return L.divIcon({
+    html: `<div style="width:30px;height:30px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:15px;${ring}">🚌</div>`,
+    className: "", iconSize: [30, 30],
+  });
+}
+function fleetTripSeen(id) {
+  const t = fleetTrips[id];
+  if (!t) return { text: "—", level: "ok" };
+  if (t.lat === null || t.lat === undefined) return { text: "بانتظار أول إشارة", level: "wait" };
+  return seenInfo(t.ts, fleetTimeOffset);
+}
+function fleetLabel(id) { return esc(fleetName(id)) + (fleetIsMine(id) ? " (أنتِ)" : ""); }
+function fleetTipHtml(id) {
+  const info = fleetTripSeen(id);
+  return `<div style="text-align:center;line-height:1.3;"><div>${fleetLabel(id)}</div><div class="seen-line seen-${info.level}">${info.text}</div></div>`;
+}
+function fleetRefreshSeen() {
+  if (!fleetMap) return;
+  const legendEl = document.getElementById("fleetLegend");
+  if (legendEl) {
+    const ids = Object.keys(fleetTrips);
+    legendEl.innerHTML = ids.length ? ids.map((id) => {
+      const info = fleetTripSeen(id);
+      return `<div class="fleet-legend-chip"><span class="fleet-legend-dot" style="background:${fleetColorFor(id)};"></span><div><div>${fleetLabel(id)}</div><div class="seen-line seen-${info.level}">${info.text}</div></div></div>`;
+    }).join("") : `<div style="font-size:12.5px;color:var(--muted);">لا يوجد باصات بالطريق حالياً</div>`;
+  }
+  Object.keys(fleetMarkers).forEach((id) => fleetMarkers[id].setTooltipContent(fleetTipHtml(id)));
+}
+function fleetFitAll() {
+  if (!fleetMap) return;
+  const pts = Object.values(fleetMarkers).map((m) => m.getLatLng());
+  if (pts.length) fleetAutoFit = false;
+  if (pts.length === 1) fleetMap.setView(pts[0], 15);
+  else if (pts.length > 1) fleetMap.fitBounds(L.latLngBounds(pts), { padding: [50, 50] });
+}
+
+function fleetApplyTrailVisibility() {
+  if (!fleetMap || !fleetTrailLayer) return;
+  const on = trailVisiblePref();
+  if (on) { if (!fleetMap.hasLayer(fleetTrailLayer)) fleetTrailLayer.addTo(fleetMap); }
+  else fleetMap.removeLayer(fleetTrailLayer);
+  const btn = document.getElementById("fleetTrailBtn");
+  if (btn) btn.classList.toggle("off", !on);
+}
+function fleetToggleTrails() { trailSavePref(!trailVisiblePref()); fleetApplyTrailVisibility(); }
+function fleetDrawTrail(id) {
+  if (!fleetTrailLayer) return;
+  const pts = fleetTrailPts[id] || [];
+  if (fleetTrailLines[id]) fleetTrailLines[id].setLatLngs(pts);
+  else fleetTrailLines[id] = L.polyline(pts, { color: fleetColorFor(id), weight: 4, opacity: 0.75 }).addTo(fleetTrailLayer);
+}
+// المسار المخزّن بالسيرفر (من بداية الرحلة) — عبر Apps Script بعد التحقق من حساب المشرفة
+async function fleetLoadTrails() {
+  try {
+    const url = `${API_URL}?action=getTrails&kind=supervisor&username=${encodeURIComponent(session.username)}&password=${encodeURIComponent(session.password)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!fleetMap) return;
+    if (data.ok) Object.keys(data.trails || {}).forEach((id) => { fleetTrailPts[id] = data.trails[id]; fleetDrawTrail(id); });
+  } catch (err) { /* بدون مسار — الخريطة تشتغل عادي */ }
+  fleetTrailReady = true;
+}
+function fleetAppendTrailPoint(id, lat, lng) {
+  if (!fleetTrailReady || !fleetMap) return;
+  const pts = fleetTrailPts[id] || (fleetTrailPts[id] = []);
+  const last = pts[pts.length - 1];
+  if (last && fleetMap.distance(last, [lat, lng]) < TRAIL_MIN_DIST_M) return;
+  pts.push([lat, lng]);
+  fleetDrawTrail(id);
+}
+
+function renderFleetTab() {
+  return `
+    <div class="fleet-wrap">
+      <div id="fleetMapEl"></div>
+      <button type="button" class="fleet-btn" style="left:12px;" onclick="fleetFitAll()" title="عرض كل الباصات">🎯</button>
+      <button type="button" class="fleet-btn" id="fleetTrailBtn" style="left:62px;" onclick="fleetToggleTrails()" title="إظهار / إخفاء المسار">〰️</button>
+    </div>
+    <div class="fleet-legend" id="fleetLegend"></div>`;
+}
+
+function initFleetMap() {
+  if (!document.getElementById("fleetMapEl")) return;
+  fleetMap = L.map("fleetMapEl", { zoomControl: true, attributionControl: false }).setView([35.95, 39.01], 12);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(fleetMap);
+  fleetMarkers = {}; fleetTrips = {}; fleetAutoFit = true;
+  fleetMap.on("dragstart", () => { fleetAutoFit = false; });
+  fleetTrailLayer = L.layerGroup(); fleetTrailLines = {}; fleetTrailPts = {}; fleetTrailReady = false;
+  fleetApplyTrailVisibility();
+  fleetLoadTrails();
+
+  fleetOffsetRef = firebase.database().ref(".info/serverTimeOffset");
+  fleetOffsetRef.on("value", (snap) => { fleetTimeOffset = snap.val() || 0; });
+
+  fleetDbRef = firebase.database().ref("live_trips");
+  fleetDbRef.on("value", (snapshot) => {
+    if (!fleetMap) return;
+    const data = snapshot.val() || {};
+    fleetTrips = {};
+    let anyPoint = false;
+    Object.keys(data).forEach((id) => {
+      const trip = data[id];
+      if (!trip || !trip.active) return;
+      fleetTrips[id] = trip;
+      if (trip.lat === null || trip.lat === undefined || trip.lng === null || trip.lng === undefined) return;
+      anyPoint = true;
+      fleetAppendTrailPoint(id, trip.lat, trip.lng);
+      if (!fleetMarkers[id]) {
+        fleetMarkers[id] = L.marker([trip.lat, trip.lng], { icon: fleetBusIcon(fleetColorFor(id), fleetIsMine(id)), zIndexOffset: fleetIsMine(id) ? 500 : 0 })
+          .bindTooltip(fleetTipHtml(id), { permanent: true, direction: "top", className: "bus-name-tooltip", offset: [0, -14] })
+          .addTo(fleetMap);
+      } else {
+        fleetMarkers[id].setLatLng([trip.lat, trip.lng]);
+      }
+    });
+    Object.keys(fleetMarkers).forEach((id) => {
+      if (!fleetTrips[id]) { fleetMap.removeLayer(fleetMarkers[id]); delete fleetMarkers[id]; }
+    });
+    Object.keys(fleetTrailLines).forEach((id) => {
+      if (!fleetTrips[id]) { fleetTrailLayer.removeLayer(fleetTrailLines[id]); delete fleetTrailLines[id]; delete fleetTrailPts[id]; }
+    });
+    fleetRefreshSeen();
+    if (anyPoint && fleetAutoFit) fleetFitAll();
+  });
+  fleetSeenTimer = setInterval(fleetRefreshSeen, 5000);
+}
+
+function teardownFleetMap() {
+  if (fleetDbRef) { fleetDbRef.off(); fleetDbRef = null; }
+  if (fleetOffsetRef) { fleetOffsetRef.off(); fleetOffsetRef = null; }
+  if (fleetSeenTimer) { clearInterval(fleetSeenTimer); fleetSeenTimer = null; }
+  if (fleetMap) { fleetMap.remove(); fleetMap = null; }
+  fleetMarkers = {}; fleetTrips = {}; fleetTrailLayer = null; fleetTrailLines = {}; fleetTrailPts = {}; fleetTrailReady = false;
 }
 
 // ---------- الإقلاع ----------
