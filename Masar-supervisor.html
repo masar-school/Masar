@@ -95,7 +95,7 @@
 
 <script>
 // ⚠️ نفس رابط Web App الموجود بأعلى index.html وMasar-staff.html — يُحدَّث بالثلاثة معاً دائماً
-const API_URL = "https://script.google.com/macros/s/AKfycbzy0uN73LG_SB9FWMKn2R_nFjHpeYWXj4LmtILXk-wXN7TBtw8EwXRnL5iP3k_MFrKT0g/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbzOiLsX7Gu5grOolZoMuQby_b505Hz1fKP7qaUvGTTpVhk1QwHaDMV2L68KxLTozOk7hw/exec";
 
 let session = null;       // { Supervisor_ID, Supervisor_Name, username, password, students, activeTrip }
 let activeTab = "trip";
@@ -104,13 +104,9 @@ let busy = false;
 
 let tripStartTs = null;
 let tripTimerInterval = null;
-let watchId = null;
-let locationPingCount = 0;
-let wakeLock = null;
 let stats = null;
 let studentFilter = "";
 let classFilter = "الكل";
-let lastError = "";
 
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, m => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m])); }
 
@@ -134,9 +130,10 @@ async function doLogin(username, password) {
     saveCreds(username, password);
     haptic();
     if (data.activeTrip) {
-      // كانت هناك رحلة نشطة أصلاً (مثلاً أُغلق التطبيق بالغلط وسط الرحلة) — نكمل تلقائياً
+      // كانت هناك رحلة نشطة أصلاً (مثلاً أُغلق التطبيق وسط الرحلة) — نكمل عرض المؤقّت فقط
       tripStartTs = new Date(String(data.activeTrip.Start_Time).replace(" ", "T")).getTime();
-      startLocationLoop();
+      if (tripTimerInterval) clearInterval(tripTimerInterval);
+      tripTimerInterval = setInterval(() => { if (activeTab === "trip") render(); }, 1000);
     }
   } catch (err) {
     loginError = "تعذر الاتصال بالخادم";
@@ -145,7 +142,7 @@ async function doLogin(username, password) {
 }
 
 function doLogout() {
-  stopLocationLoop();
+  if (tripTimerInterval) { clearInterval(tripTimerInterval); tripTimerInterval = null; }
   clearCreds();
   session = null;
   render();
@@ -160,7 +157,8 @@ async function startTrip() {
     if (!data.ok) { alert(data.error || "تعذر بدء الرحلة"); busy = false; render(); return; }
     tripStartTs = Date.now();
     haptic();
-    startLocationLoop();
+    if (tripTimerInterval) clearInterval(tripTimerInterval);
+    tripTimerInterval = setInterval(() => { if (activeTab === "trip") render(); }, 1000);
   } catch (err) { alert("تعذر الاتصال بالخادم"); }
   busy = false; render();
 }
@@ -173,88 +171,10 @@ async function endTrip() {
     if (!data.ok) { alert(data.error || "تعذر إنهاء الرحلة"); busy = false; render(); return; }
     haptic();
   } catch (err) { alert("تعذر الاتصال بالخادم"); }
-  stopLocationLoop();
+  if (tripTimerInterval) { clearInterval(tripTimerInterval); tripTimerInterval = null; }
   tripStartTs = null;
   busy = false; render();
 }
-
-function geoErrorText(err) {
-  if (!err) return "خطأ غير معروف بتحديد الموقع";
-  const map = {
-    1: "تم رفض إذن الموقع (PERMISSION_DENIED) — تحقق من إعدادات الموقع بالمتصفح/التطبيق",
-    2: "تعذر تحديد الموقع حالياً (POSITION_UNAVAILABLE) — تأكد إن GPS شغّال وإنك برّا",
-    3: "انتهت مهلة تحديد الموقع (TIMEOUT) — قد تكون إشارة GPS ضعيفة",
-  };
-  return map[err.code] || ("خطأ: " + (err.message || err.code || "غير معروف"));
-}
-
-function startLocationLoop() {
-  requestWakeLock();
-  if (!("geolocation" in navigator)) { lastError = "الجهاز/المتصفح لا يدعم تحديد الموقع إطلاقاً"; render(); return; }
-  locationPingCount = 0;
-  lastError = "";
-  sendLocationOnce();
-  watchId = navigator.geolocation.watchPosition(
-    (pos) => { lastPos = pos; lastError = ""; if (activeTab === "trip") render(); },
-    (err) => { lastError = "watchPosition: " + geoErrorText(err); if (activeTab === "trip") render(); },
-    { enableHighAccuracy: false, maximumAge: 10000, timeout: 20000 }
-  );
-  pingInterval = setInterval(sendLocationOnce, 12000);
-  if (tripTimerInterval) clearInterval(tripTimerInterval);
-  tripTimerInterval = setInterval(() => { if (activeTab === "trip") render(); }, 1000);
-}
-
-let lastPos = null;
-let pingInterval = null;
-
-async function sendLocationOnce() {
-  if (!lastPos) {
-    // أول قراءة لسّا ما وصلت من watchPosition — نطلب قراءة فورية واحدة بدل الانتظار
-    navigator.geolocation.getCurrentPosition(
-      (pos) => { lastPos = pos; lastError = ""; postLocation(pos); },
-      (err) => { lastError = "getCurrentPosition: " + geoErrorText(err); if (activeTab === "trip") render(); },
-      { enableHighAccuracy: false, timeout: 20000 }
-    );
-    return;
-  }
-  postLocation(lastPos);
-}
-
-async function postLocation(pos) {
-  try {
-    const res = await fetch(API_URL, {
-      method: "POST",
-      body: JSON.stringify({
-        action: "updateLocation", username: session.username, password: session.password,
-        lat: pos.coords.latitude, lng: pos.coords.longitude,
-      }),
-    });
-    const data = await res.json();
-    if (data.ok) { locationPingCount++; lastError = ""; if (activeTab === "trip") render(); }
-    else { lastError = "رفض الخادم: " + (data.error || "غير معروف"); if (activeTab === "trip") render(); }
-  } catch (err) { lastError = "فشل الاتصال بالخادم: " + (err.message || err); if (activeTab === "trip") render(); }
-}
-
-function stopLocationLoop() {
-  if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
-  if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
-  if (tripTimerInterval) { clearInterval(tripTimerInterval); tripTimerInterval = null; }
-  releaseWakeLock();
-  lastPos = null;
-}
-
-async function requestWakeLock() {
-  try {
-    if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen");
-  } catch (err) { wakeLock = null; }
-}
-function releaseWakeLock() {
-  try { wakeLock && wakeLock.release(); } catch (err) {}
-  wakeLock = null;
-}
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && tripStartTs && !wakeLock) requestWakeLock();
-});
 
 function formatDuration(ms) {
   const total = Math.floor(ms / 1000);
@@ -337,15 +257,15 @@ function renderTripTab() {
   const active = !!tripStartTs;
   const dur = active ? formatDuration(Date.now() - tripStartTs) : "00:00";
   return `
-    ${active ? `<div class="wake-warning">⚠️ خلّي هالصفحة مفتوحة على الشاشة طول الرحلة، وما تفتحي واتساب أو تطبيقات ثانية — غير هيك رح ينقطع إرسال الموقع.</div>` : ""}
     <div class="trip-card">
       <div class="trip-state">${active ? "الرحلة جارية الآن" : "لا توجد رحلة حالياً"}</div>
       <div class="trip-timer">${dur}</div>
       <button class="trip-btn ${active ? "end" : "start"}" id="tripBtn" ${busy ? "disabled" : ""}>
         ${busy ? "..." : (active ? "إنهاء الرحلة" : "ابدأ الرحلة")}
       </button>
-      ${active ? `<div class="ping-status"><span class="ping-dot"></span> تم إرسال ${locationPingCount} نبضة موقع</div>` : `<div class="trip-note">اضغطي "ابدأ الرحلة" عند انطلاق الباص — رح توصل رسالة تلقائية لأولياء الأمور، وتظهر خريطة حية بتطبيقهم.</div>`}
-      ${lastError ? `<div class="wake-warning" style="margin-top:12px;background:#FBE0DC;border-color:#E9A79C;color:#8A2E1E;">⚠️ ${esc(lastError)}</div>` : ""}
+      ${active
+        ? `<div class="trip-note">تم تفعيل الرحلة — الموقع يُرسل تلقائياً من تطبيق GPSLogger بالخلفية. تقدرين تسكّري هالصفحة الآن، وترجعي تفتحيها بس وقت انتهاء الرحلة.</div>`
+        : `<div class="trip-note">اضغطي "ابدأ الرحلة" عند انطلاق الباص (وتأكدي إن GPSLogger شغّال) — رح توصل رسالة تلقائية لأولياء الأمور، وتظهر خريطة حية بتطبيقهم.</div>`}
     </div>
   `;
 }

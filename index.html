@@ -15,6 +15,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 <style>
   * { box-sizing: border-box; }
   :root {
@@ -97,8 +99,12 @@
   .live-map-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border); }
   .live-map-title { font-size: 15px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; }
   .live-map-close { background: var(--bg); border: none; width: 32px; height: 32px; border-radius: 10px; font-size: 15px; color: var(--text); cursor: pointer; }
-  #liveMapEl { flex: 1; }
+  #liveMapEl { position: absolute; inset: 0; }
   .live-map-status { padding: 10px 16px; font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--border); text-align: center; }
+  .live-map-body-wrap { position: relative; flex: 1; min-height: 0; }
+  .live-my-loc-btn { position: absolute; bottom: 14px; left: 14px; z-index: 1100; background: var(--card); border: 1px solid var(--border); border-radius: 50%; width: 42px; height: 42px; font-size: 18px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); cursor: pointer; }
+  .bus-name-tooltip { background: var(--header); color: #fff; border: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; box-shadow: none; }
+  .bus-name-tooltip::before { display: none; }
 
   .task-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; margin-bottom: 10px; border-right: 4px solid var(--header); }
   .task-title { font-size: 14.5px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
@@ -407,7 +413,9 @@
 
 <script>
 // تأكد من وضع الرابط الجديد للـ Web App هنا
-const API_URL = "https://script.google.com/macros/s/AKfycbzy0uN73LG_SB9FWMKn2R_nFjHpeYWXj4LmtILXk-wXN7TBtw8EwXRnL5iP3k_MFrKT0g/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbzOiLsX7Gu5grOolZoMuQby_b505Hz1fKP7qaUvGTTpVhk1QwHaDMV2L68KxLTozOk7hw/exec";
+const FIREBASE_DB_URL = "https://masar-tracking-21339-default-rtdb.europe-west1.firebasedatabase.app";
+if (!firebase.apps.length) firebase.initializeApp({ databaseURL: FIREBASE_DB_URL });
 
 let session = null;
 let currentChildIndex = 0;
@@ -1453,14 +1461,22 @@ function busRowHtml(c) {
   return `<div class="kid-bus"><span>🚌 مشرف الباص: <b>${name}</b></span><span style="display:flex;gap:6px;align-items:center;">${liveBtn}${action}</span></div>`;
 }
 
-// ---------- الخريطة الحية (تتبع مباشر من تطبيق المشرفة) ----------
+// ---------- الخريطة الحية (تتبع مباشر من تطبيق المشرفة عبر Firebase) ----------
 let liveMapInstance = null;
 let liveMapMarker = null;
-let liveMapPollTimer = null;
-let liveMapSupervisorId = null;
+let liveMapDbRef = null;
+let liveMyLocMarker = null;
+let liveMyLocWatchId = null;
+
+function busColorFor(id) {
+  const colors = ["#E74C3C", "#3498DB", "#2ECC71", "#F39C12", "#9B59B6", "#1ABC9C", "#E67E22", "#34495E", "#D35400", "#16A085"];
+  let h = 0;
+  const s = String(id || "");
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return colors[h % colors.length];
+}
 
 function openLiveMap(supervisorId, supervisorName) {
-  liveMapSupervisorId = supervisorId;
   const overlay = document.createElement("div");
   overlay.className = "live-map-overlay";
   overlay.id = "liveMapOverlay";
@@ -1470,32 +1486,34 @@ function openLiveMap(supervisorId, supervisorName) {
         <div class="live-map-title">🚌 <span>${esc(supervisorName)}</span></div>
         <button type="button" class="live-map-close" onclick="closeLiveMap()">✕</button>
       </div>
-      <div id="liveMapEl"></div>
-      <div class="live-map-status" id="liveMapStatus">جارِ تحديد الموقع…</div>
+      <div class="live-map-body-wrap">
+        <div id="liveMapEl"></div>
+        <button type="button" class="live-my-loc-btn" onclick="liveMapShowMyLocation()" title="موقعي">📍</button>
+      </div>
+      <div class="live-map-status" id="liveMapStatus">جارِ الاتصال...</div>
     </div>`;
   document.body.appendChild(overlay);
 
   liveMapInstance = L.map("liveMapEl", { zoomControl: true, attributionControl: false }).setView([0, 0], 15);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(liveMapInstance);
-  const busIcon = L.divIcon({ html: "🚌", className: "", iconSize: [30, 30] });
-  liveMapMarker = L.marker([0, 0], { icon: busIcon });
+  const color = busColorFor(supervisorId);
+  const busIcon = L.divIcon({
+    html: `<div style="width:30px;height:30px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:0 1px 4px rgba(0,0,0,0.4);">🚌</div>`,
+    className: "", iconSize: [30, 30],
+  });
+  liveMapMarker = L.marker([0, 0], { icon: busIcon })
+    .bindTooltip(esc(supervisorName), { permanent: true, direction: "top", className: "bus-name-tooltip", offset: [0, -14] });
 
-  pollLiveMap();
-  liveMapPollTimer = setInterval(pollLiveMap, 15000);
-}
-
-async function pollLiveMap() {
-  const statusEl = document.getElementById("liveMapStatus");
-  if (!liveMapSupervisorId) return;
-  try {
-    const res = await fetch(`${API_URL}?action=getLiveTrip&supervisorId=${encodeURIComponent(liveMapSupervisorId)}`);
-    const data = await res.json();
-    if (!data.ok || !data.active) {
+  // مستمع لحظي — يتحدّث فوراً وقت وصول نبضة جديدة، بدون أي استعلام متكرر
+  liveMapDbRef = firebase.database().ref("live_trips/" + supervisorId);
+  liveMapDbRef.on("value", (snapshot) => {
+    const statusEl = document.getElementById("liveMapStatus");
+    const data = snapshot.val();
+    if (!data || !data.active) {
       if (statusEl) statusEl.textContent = "انتهت الرحلة";
-      clearInterval(liveMapPollTimer);
       return;
     }
-    if (data.lat !== null && data.lng !== null && data.lat !== undefined && data.lng !== undefined) {
+    if (data.lat !== null && data.lat !== undefined && data.lng !== null && data.lng !== undefined) {
       liveMapInstance.setView([data.lat, data.lng], liveMapInstance.getZoom() < 14 ? 16 : liveMapInstance.getZoom());
       liveMapMarker.setLatLng([data.lat, data.lng]).addTo(liveMapInstance);
       const ageSec = data.ts ? Math.round((Date.now() - data.ts) / 1000) : null;
@@ -1503,15 +1521,31 @@ async function pollLiveMap() {
     } else {
       if (statusEl) statusEl.textContent = "الرحلة بدأت، بانتظار أول إشارة موقع…";
     }
-  } catch (err) {
-    if (statusEl) statusEl.textContent = "تعذر تحديث الموقع";
-  }
+  }, (err) => {
+    const statusEl = document.getElementById("liveMapStatus");
+    if (statusEl) statusEl.textContent = "تعذر الاتصال بالخدمة الحية";
+  });
+}
+
+function liveMapShowMyLocation() {
+  if (!("geolocation" in navigator)) { alert("الجهاز لا يدعم تحديد الموقع"); return; }
+  if (liveMyLocWatchId !== null) { navigator.geolocation.clearWatch(liveMyLocWatchId); liveMyLocWatchId = null; }
+  const meIcon = L.divIcon({ html: `<div style="width:18px;height:18px;border-radius:50%;background:#4285F4;border:3px solid #fff;box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>`, className: "", iconSize: [18, 18] });
+  liveMyLocWatchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      const ll = [pos.coords.latitude, pos.coords.longitude];
+      if (!liveMyLocMarker) liveMyLocMarker = L.marker(ll, { icon: meIcon }).bindTooltip("أنا هون", { permanent: false }).addTo(liveMapInstance);
+      else liveMyLocMarker.setLatLng(ll);
+    },
+    () => { alert("تعذر تحديد موقعك — تأكد من تفعيل إذن الموقع"); },
+    { enableHighAccuracy: false, timeout: 20000 }
+  );
 }
 
 function closeLiveMap() {
-  if (liveMapPollTimer) clearInterval(liveMapPollTimer);
-  liveMapPollTimer = null;
-  liveMapSupervisorId = null;
+  if (liveMapDbRef) { liveMapDbRef.off(); liveMapDbRef = null; }
+  if (liveMyLocWatchId !== null) { navigator.geolocation.clearWatch(liveMyLocWatchId); liveMyLocWatchId = null; }
+  liveMyLocMarker = null;
   if (liveMapInstance) { liveMapInstance.remove(); liveMapInstance = null; liveMapMarker = null; }
   const overlay = document.getElementById("liveMapOverlay");
   if (overlay) overlay.remove();
