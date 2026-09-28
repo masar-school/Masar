@@ -105,6 +105,8 @@
   .live-my-loc-btn { position: absolute; bottom: 14px; left: 14px; z-index: 1100; background: var(--card); border: 1px solid var(--border); border-radius: 50%; width: 42px; height: 42px; font-size: 18px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); cursor: pointer; }
   .bus-name-tooltip { background: var(--header); color: #fff; border: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; box-shadow: none; }
   .bus-name-tooltip::before { display: none; }
+  .live-map-status.seen-late { color: #E67E22; font-weight: 700; }
+  .live-map-status.seen-lost { color: #D32F2F; font-weight: 700; }
 
   .task-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; margin-bottom: 10px; border-right: 4px solid var(--header); }
   .task-title { font-size: 14.5px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
@@ -1467,6 +1469,12 @@ let liveMapMarker = null;
 let liveMapDbRef = null;
 let liveMyLocMarker = null;
 let liveMyLocWatchId = null;
+let liveMapFollow = true;    // الخريطة تتبع الباص لحد ما ولي الأمر يحرّكها بإيده
+let liveMapLastBus = null;
+let liveMapTrip = null;
+let liveMapTimeOffset = 0;
+let liveMapOffsetRef = null;
+let liveMapSeenTimer = null;
 
 function busColorFor(id) {
   const colors = ["#E74C3C", "#3498DB", "#2ECC71", "#F39C12", "#9B59B6", "#1ABC9C", "#E67E22", "#34495E", "#D35400", "#16A085"];
@@ -1474,6 +1482,35 @@ function busColorFor(id) {
   const s = String(id || "");
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
   return colors[h % colors.length];
+}
+
+// نص "آخر ظهور" النسبي + مستوى اللون (ok / late / lost). offset = فرق ساعة Firebase عن ساعة الجهاز
+function seenInfo(ts, offset) {
+  if (!ts) return { text: "—", level: "ok" };
+  const age = Math.max(0, Math.round((Date.now() + (offset || 0) - ts) / 1000));
+  let text;
+  if (age < 15) text = "الآن";
+  else if (age < 60) text = `قبل ${age} ث`;
+  else if (age < 3600) text = `قبل ${Math.floor(age / 60)} د`;
+  else text = `قبل ${Math.floor(age / 3600)} ساعة`;
+  let level = "ok";
+  if (age > 300) { level = "lost"; text += " · منقطع"; }
+  else if (age > 150) { level = "late"; text += " · متأخر"; }
+  return { text, level };
+}
+
+// شريط الحالة: "آخر ظهور" يتحدّث لحاله كل 5 ثوانٍ وبيتلوّن لو تأخّر
+function liveMapRefreshSeen() {
+  const el = document.getElementById("liveMapStatus");
+  if (!el) return;
+  const t = liveMapTrip;
+  if (!t || !t.active) { el.textContent = "انتهت الرحلة"; el.className = "live-map-status"; return; }
+  if (t.lat === null || t.lat === undefined || t.lng === null || t.lng === undefined) {
+    el.textContent = "الرحلة بدأت، بانتظار أول إشارة موقع…"; el.className = "live-map-status"; return;
+  }
+  const info = seenInfo(t.ts, liveMapTimeOffset);
+  el.textContent = "آخر ظهور: " + info.text;
+  el.className = "live-map-status seen-" + info.level;
 }
 
 function openLiveMap(supervisorId, supervisorName) {
@@ -1503,49 +1540,83 @@ function openLiveMap(supervisorId, supervisorName) {
   });
   liveMapMarker = L.marker([0, 0], { icon: busIcon })
     .bindTooltip(esc(supervisorName), { permanent: true, direction: "top", className: "bus-name-tooltip", offset: [0, -14] });
+  liveMapFollow = true;
+  liveMapLastBus = null;
+  liveMapInstance.on("dragstart", () => { liveMapFollow = false; });
 
   // مستمع لحظي — يتحدّث فوراً وقت وصول نبضة جديدة، بدون أي استعلام متكرر
+  // فرق التوقيت بين ساعة الجهاز وساعة Firebase — حتى لا يظهر "آخر ظهور" غلط لو ساعة الجوال مضبوطة غلط
+  liveMapOffsetRef = firebase.database().ref(".info/serverTimeOffset");
+  liveMapOffsetRef.on("value", (snap) => { liveMapTimeOffset = snap.val() || 0; });
+
   liveMapDbRef = firebase.database().ref("live_trips/" + supervisorId);
   liveMapDbRef.on("value", (snapshot) => {
-    const statusEl = document.getElementById("liveMapStatus");
     const data = snapshot.val();
-    if (!data || !data.active) {
-      if (statusEl) statusEl.textContent = "انتهت الرحلة";
-      return;
+    liveMapTrip = data;
+    if (data && data.active && data.lat !== null && data.lat !== undefined && data.lng !== null && data.lng !== undefined) {
+      const ll = [data.lat, data.lng];
+      const firstBusFix = !liveMapLastBus;
+      liveMapLastBus = ll;
+      liveMapMarker.setLatLng(ll).addTo(liveMapInstance);
+      if (firstBusFix) { if (liveMyLocMarker) liveMapFitBusAndMe(); else liveMapInstance.setView(ll, 16); }
+      else if (liveMapFollow) liveMapInstance.panTo(ll);   // تتبّع بدون تغيير مستوى التقريب
     }
-    if (data.lat !== null && data.lat !== undefined && data.lng !== null && data.lng !== undefined) {
-      liveMapInstance.setView([data.lat, data.lng], liveMapInstance.getZoom() < 14 ? 16 : liveMapInstance.getZoom());
-      liveMapMarker.setLatLng([data.lat, data.lng]).addTo(liveMapInstance);
-      const ageSec = data.ts ? Math.round((Date.now() - data.ts) / 1000) : null;
-      if (statusEl) statusEl.textContent = ageSec !== null ? `آخر تحديث قبل ${ageSec} ثانية` : "تم تحديد الموقع";
-    } else {
-      if (statusEl) statusEl.textContent = "الرحلة بدأت، بانتظار أول إشارة موقع…";
-    }
+    liveMapRefreshSeen();
   }, (err) => {
     const statusEl = document.getElementById("liveMapStatus");
     if (statusEl) statusEl.textContent = "تعذر الاتصال بالخدمة الحية";
   });
+  liveMapSeenTimer = setInterval(liveMapRefreshSeen, 5000);   // "آخر ظهور" يتحدّث لحاله حتى بدون نقطة جديدة
+}
+
+// أيقونة "موقعي": دبوس 📍 وفوقه كلمة موقعي
+function myPinIcon() {
+  return L.divIcon({
+    html: `<div style="transform:translate(-50%,-100%);display:flex;flex-direction:column;align-items:center;"><div style="background:#4285F4;color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;white-space:nowrap;">موقعي</div><div style="font-size:26px;line-height:1;">📍</div></div>`,
+    className: "", iconSize: [0, 0], iconAnchor: [0, 0],
+  });
+}
+
+// يعرض الباص وموقعي بنفس الشاشة (لمعرفة المسافة بينكم)
+function liveMapFitBusAndMe() {
+  if (!liveMapInstance) return;
+  const pts = [];
+  if (liveMapLastBus) pts.push(liveMapLastBus);
+  if (liveMyLocMarker) pts.push(liveMyLocMarker.getLatLng());
+  if (pts.length >= 2) { liveMapFollow = false; liveMapInstance.fitBounds(L.latLngBounds(pts), { padding: [50, 50] }); }
+  else if (pts.length === 1) liveMapInstance.setView(pts[0], Math.max(liveMapInstance.getZoom(), 15));
 }
 
 function liveMapShowMyLocation() {
   if (!("geolocation" in navigator)) { alert("الجهاز لا يدعم تحديد الموقع"); return; }
-  if (liveMyLocWatchId !== null) { navigator.geolocation.clearWatch(liveMyLocWatchId); liveMyLocWatchId = null; }
-  const meIcon = L.divIcon({ html: `<div style="width:18px;height:18px;border-radius:50%;background:#4285F4;border:3px solid #fff;box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>`, className: "", iconSize: [18, 18] });
+  if (liveMyLocMarker) { liveMapFitBusAndMe(); return; }   // موقعي معروف أصلاً: بس أظهرني مع الباص
+  if (liveMyLocWatchId !== null) return;                    // لسا بانتظار أول إشارة
+  let firstFix = true;
   liveMyLocWatchId = navigator.geolocation.watchPosition(
     (pos) => {
+      if (!liveMapInstance) return;
       const ll = [pos.coords.latitude, pos.coords.longitude];
-      if (!liveMyLocMarker) liveMyLocMarker = L.marker(ll, { icon: meIcon }).bindTooltip("أنا هون", { permanent: false }).addTo(liveMapInstance);
-      else liveMyLocMarker.setLatLng(ll);
+      if (!liveMyLocMarker) liveMyLocMarker = L.marker(ll, { icon: myPinIcon() }).addTo(liveMapInstance);
+      else liveMyLocMarker.setLatLng(ll);            // التحديثات اللاحقة تحرّك الدبوس فقط، بدون سحب الخريطة
+      if (firstFix) { firstFix = false; liveMapFitBusAndMe(); }
     },
-    () => { alert("تعذر تحديد موقعك — تأكد من تفعيل إذن الموقع"); },
+    () => {
+      if (liveMyLocMarker) return;                    // خطأ عابر بعد ما نجح تحديد الموقع: تجاهله
+      if (liveMyLocWatchId !== null) { navigator.geolocation.clearWatch(liveMyLocWatchId); liveMyLocWatchId = null; }
+      alert("تعذر تحديد موقعك — تأكد من تفعيل إذن الموقع");
+    },
     { enableHighAccuracy: false, timeout: 20000 }
   );
 }
 
 function closeLiveMap() {
   if (liveMapDbRef) { liveMapDbRef.off(); liveMapDbRef = null; }
+  if (liveMapOffsetRef) { liveMapOffsetRef.off(); liveMapOffsetRef = null; }
+  if (liveMapSeenTimer) { clearInterval(liveMapSeenTimer); liveMapSeenTimer = null; }
+  liveMapTrip = null;
   if (liveMyLocWatchId !== null) { navigator.geolocation.clearWatch(liveMyLocWatchId); liveMyLocWatchId = null; }
   liveMyLocMarker = null;
+  liveMapLastBus = null;
   if (liveMapInstance) { liveMapInstance.remove(); liveMapInstance = null; liveMapMarker = null; }
   const overlay = document.getElementById("liveMapOverlay");
   if (overlay) overlay.remove();

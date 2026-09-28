@@ -396,6 +396,13 @@
   .fleet-map-body-wrap { position: relative; flex: 1; min-height: 0; }
   .bus-name-tooltip { background: var(--header, #16233F); color: #fff; border: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; box-shadow: none; }
   .bus-name-tooltip::before { display: none; }
+  .seen-line { font-size: 9.5px; font-weight: 500; }
+  .seen-ok, .seen-wait { color: var(--muted, #8A8578); }
+  .seen-late { color: #E67E22; font-weight: 700; }
+  .seen-lost { color: #D32F2F; font-weight: 700; }
+  .bus-name-tooltip .seen-ok, .bus-name-tooltip .seen-wait { color: #CFD6E4; }
+  .bus-name-tooltip .seen-late { color: #FFB74D; }
+  .bus-name-tooltip .seen-lost { color: #FF8A80; }
 
 </style>
 </head>
@@ -2842,6 +2849,7 @@ let fleetMarkers = {};       // Supervisor_ID -> L.marker
 let fleetDbRef = null;
 let fleetMyLocMarker = null;
 let fleetMyLocWatchId = null;
+let fleetAutoFit = true;   // يضبط الخريطة على الباصات مرة وحدة، وبعدها ما يسحبها وراه
 
 const FLEET_COLORS = ["#E74C3C", "#3498DB", "#2ECC71", "#F39C12", "#9B59B6", "#1ABC9C", "#E67E22", "#34495E", "#D35400", "#16A085"];
 function fleetColorFor(id) {
@@ -2859,6 +2867,50 @@ function fleetBusIcon(color) {
     html: `<div style="width:30px;height:30px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:0 1px 4px rgba(0,0,0,0.4);">🚌</div>`,
     className: "", iconSize: [30, 30],
   });
+}
+
+// نص "آخر ظهور" النسبي + مستوى اللون (ok / late / lost). offset = فرق ساعة Firebase عن ساعة الجهاز
+function seenInfo(ts, offset) {
+  if (!ts) return { text: "—", level: "ok" };
+  const age = Math.max(0, Math.round((Date.now() + (offset || 0) - ts) / 1000));
+  let text;
+  if (age < 15) text = "الآن";
+  else if (age < 60) text = `قبل ${age} ث`;
+  else if (age < 3600) text = `قبل ${Math.floor(age / 60)} د`;
+  else text = `قبل ${Math.floor(age / 3600)} ساعة`;
+  let level = "ok";
+  if (age > 300) { level = "lost"; text += " · منقطع"; }
+  else if (age > 150) { level = "late"; text += " · متأخر"; }
+  return { text, level };
+}
+
+let fleetTrips = {};          // Supervisor_ID -> بيانات الرحلة النشطة الأخيرة من Firebase
+let fleetTimeOffset = 0;
+let fleetOffsetRef = null;
+let fleetSeenTimer = null;
+
+function fleetTripSeen(supId) {
+  const t = fleetTrips[supId];
+  if (!t) return { text: "—", level: "ok" };
+  if (t.lat === null || t.lat === undefined) return { text: "بانتظار أول إشارة", level: "wait" };
+  return seenInfo(t.ts, fleetTimeOffset);
+}
+function fleetTipHtml(supId) {
+  const info = fleetTripSeen(supId);
+  return `<div style="text-align:center;line-height:1.3;"><div>${staffEsc(fleetSupervisorName(supId))}</div><div class="seen-line seen-${info.level}">${info.text}</div></div>`;
+}
+// يحدّث القائمة السفلية ونصوص فوق العلامات — يُستدعى مع كل نقطة جديدة وكل 5 ثوانٍ
+function fleetRefreshSeen() {
+  if (!fleetMapInstance) return;
+  const legendEl = document.getElementById("fleetLegend");
+  if (legendEl) {
+    const ids = Object.keys(fleetTrips);
+    legendEl.innerHTML = ids.length ? ids.map((supId) => {
+      const info = fleetTripSeen(supId);
+      return `<div class="fleet-legend-chip"><span class="fleet-legend-dot" style="background:${fleetColorFor(supId)};"></span><div><div>${staffEsc(fleetSupervisorName(supId))}</div><div class="seen-line seen-${info.level}">${info.text}</div></div></div>`;
+    }).join("") : `<div style="font-size:12px;color:var(--muted);">لا يوجد رحلات نشطة حالياً</div>`;
+  }
+  Object.keys(fleetMarkers).forEach((supId) => fleetMarkers[supId].setTooltipContent(fleetTipHtml(supId)));
 }
 
 function openFleetMap() {
@@ -2882,67 +2934,90 @@ function openFleetMap() {
   fleetMapInstance = L.map("fleetMapEl", { zoomControl: true, attributionControl: false }).setView([35.3, 40.14], 11);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(fleetMapInstance);
   fleetMarkers = {};
+  fleetAutoFit = true;
+  fleetMapInstance.on("dragstart", () => { fleetAutoFit = false; });   // لمّا المدير يحرّك الخريطة بإيده، نبطّل نسحبها
+
+  // فرق التوقيت بين ساعة الجهاز وساعة Firebase — حتى لا يظهر "آخر ظهور" غلط لو ساعة الجوال مضبوطة غلط
+  fleetOffsetRef = firebase.database().ref(".info/serverTimeOffset");
+  fleetOffsetRef.on("value", (snap) => { fleetTimeOffset = snap.val() || 0; });
 
   fleetDbRef = firebase.database().ref("live_trips");
   fleetDbRef.on("value", (snapshot) => {
     const data = snapshot.val() || {};
-    const seenIds = new Set();
-    let legendHtml = "";
+    fleetTrips = {};
     let anyPoint = false;
 
     Object.keys(data).forEach((supId) => {
       const trip = data[supId];
       if (!trip || !trip.active) return;
-      seenIds.add(supId);
-      const name = fleetSupervisorName(supId);
-      const color = fleetColorFor(supId);
-      legendHtml += `<div class="fleet-legend-chip"><span class="fleet-legend-dot" style="background:${color};"></span>${staffEsc(name)}</div>`;
-
+      fleetTrips[supId] = trip;
       if (trip.lat === null || trip.lat === undefined || trip.lng === null || trip.lng === undefined) return;
       anyPoint = true;
       if (!fleetMarkers[supId]) {
-        fleetMarkers[supId] = L.marker([trip.lat, trip.lng], { icon: fleetBusIcon(color) })
-          .bindTooltip(staffEsc(name), { permanent: true, direction: "top", className: "bus-name-tooltip", offset: [0, -14] })
+        fleetMarkers[supId] = L.marker([trip.lat, trip.lng], { icon: fleetBusIcon(fleetColorFor(supId)) })
+          .bindTooltip(fleetTipHtml(supId), { permanent: true, direction: "top", className: "bus-name-tooltip", offset: [0, -14] })
           .addTo(fleetMapInstance);
       } else {
         fleetMarkers[supId].setLatLng([trip.lat, trip.lng]);
       }
     });
 
-    // إزالة أي علامة لمشرفة عادت غير نشطة أو انتهت رحلتها
+    // إزالة أي علامة لمشرفة انتهت رحلتها
     Object.keys(fleetMarkers).forEach((supId) => {
-      if (!seenIds.has(supId)) { fleetMapInstance.removeLayer(fleetMarkers[supId]); delete fleetMarkers[supId]; }
+      if (!fleetTrips[supId]) { fleetMapInstance.removeLayer(fleetMarkers[supId]); delete fleetMarkers[supId]; }
     });
 
-    const legendEl = document.getElementById("fleetLegend");
-    if (legendEl) legendEl.innerHTML = legendHtml || `<div style="font-size:12px;color:var(--muted);">لا يوجد رحلات نشطة حالياً</div>`;
+    fleetRefreshSeen();
+    if (anyPoint && fleetAutoFit) fleetFitAll();
+  });
+  fleetSeenTimer = setInterval(fleetRefreshSeen, 5000);   // "آخر ظهور" يتحدّث لحاله حتى بدون نقطة جديدة
+}
 
-    if (anyPoint) {
-      const pts = Object.values(fleetMarkers).map(m => m.getLatLng());
-      if (pts.length === 1) fleetMapInstance.setView(pts[0], 15);
-      else if (pts.length > 1) fleetMapInstance.fitBounds(L.latLngBounds(pts), { padding: [40, 40] });
-    }
+// يعرض كل الباصات (ومعهم موقعي إن كان ظاهراً) بنفس الشاشة
+function fleetFitAll() {
+  if (!fleetMapInstance) return;
+  const pts = Object.values(fleetMarkers).map(m => m.getLatLng());
+  if (pts.length) fleetAutoFit = false;
+  if (fleetMyLocMarker) pts.push(fleetMyLocMarker.getLatLng());
+  if (pts.length === 1) fleetMapInstance.setView(pts[0], 15);
+  else if (pts.length > 1) fleetMapInstance.fitBounds(L.latLngBounds(pts), { padding: [50, 50] });
+}
+
+// أيقونة "موقعي": دبوس 📍 وفوقه كلمة موقعي
+function myPinIcon() {
+  return L.divIcon({
+    html: `<div style="transform:translate(-50%,-100%);display:flex;flex-direction:column;align-items:center;"><div style="background:#4285F4;color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;white-space:nowrap;">موقعي</div><div style="font-size:26px;line-height:1;">📍</div></div>`,
+    className: "", iconSize: [0, 0], iconAnchor: [0, 0],
   });
 }
 
 function fleetShowMyLocation() {
   if (!("geolocation" in navigator)) { alert("الجهاز لا يدعم تحديد الموقع"); return; }
-  if (fleetMyLocWatchId !== null) { navigator.geolocation.clearWatch(fleetMyLocWatchId); fleetMyLocWatchId = null; }
-  const meIcon = L.divIcon({ html: `<div style="width:18px;height:18px;border-radius:50%;background:#4285F4;border:3px solid #fff;box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>`, className: "", iconSize: [18, 18] });
+  if (fleetMyLocMarker) { fleetFitAll(); return; }     // موقعي معروف أصلاً: بس أظهرني مع الباصات
+  if (fleetMyLocWatchId !== null) return;               // لسا بانتظار أول إشارة
+  let firstFix = true;
   fleetMyLocWatchId = navigator.geolocation.watchPosition(
     (pos) => {
+      if (!fleetMapInstance) return;
       const ll = [pos.coords.latitude, pos.coords.longitude];
-      if (!fleetMyLocMarker) fleetMyLocMarker = L.marker(ll, { icon: meIcon }).bindTooltip("أنا هون", { permanent: false }).addTo(fleetMapInstance);
-      else fleetMyLocMarker.setLatLng(ll);
-      fleetMapInstance.setView(ll, Math.max(fleetMapInstance.getZoom(), 14));
+      if (!fleetMyLocMarker) fleetMyLocMarker = L.marker(ll, { icon: myPinIcon() }).addTo(fleetMapInstance);
+      else fleetMyLocMarker.setLatLng(ll);          // التحديثات اللاحقة تحرّك الدبوس فقط، بدون سحب الخريطة
+      if (firstFix) { firstFix = false; fleetFitAll(); }
     },
-    () => { alert("تعذر تحديد موقعك — تأكد من تفعيل إذن الموقع"); },
+    () => {
+      if (fleetMyLocMarker) return;                  // خطأ عابر بعد ما نجح تحديد الموقع: تجاهله
+      if (fleetMyLocWatchId !== null) { navigator.geolocation.clearWatch(fleetMyLocWatchId); fleetMyLocWatchId = null; }
+      alert("تعذر تحديد موقعك — تأكد من تفعيل إذن الموقع");
+    },
     { enableHighAccuracy: false, timeout: 20000 }
   );
 }
 
 function closeFleetMap() {
   if (fleetDbRef) { fleetDbRef.off(); fleetDbRef = null; }
+  if (fleetOffsetRef) { fleetOffsetRef.off(); fleetOffsetRef = null; }
+  if (fleetSeenTimer) { clearInterval(fleetSeenTimer); fleetSeenTimer = null; }
+  fleetTrips = {};
   if (fleetMyLocWatchId !== null) { navigator.geolocation.clearWatch(fleetMyLocWatchId); fleetMyLocWatchId = null; }
   fleetMyLocMarker = null;
   if (fleetMapInstance) { fleetMapInstance.remove(); fleetMapInstance = null; }
