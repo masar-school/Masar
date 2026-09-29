@@ -396,8 +396,33 @@
   .fleet-map-body-wrap { position: relative; flex: 1; min-height: 0; }
   .fleet-trail-btn { position: absolute; bottom: 14px; left: 64px; z-index: 1100; background: var(--card); border: 1px solid var(--border); border-radius: 50%; width: 42px; height: 42px; font-size: 18px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); cursor: pointer; }
   .fleet-trail-btn.off { opacity: 0.45; }
+
+  .th-days { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0 16px; }
+  .th-day { display: flex; align-items: center; gap: 6px; padding: 9px 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font-size: 13px; color: var(--text); cursor: pointer; }
+  .th-times { display: flex; gap: 12px; margin: 10px 0 16px; }
+  .th-times > div { flex: 1; }
+  .th-times label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+  .th-times input { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-family: inherit; font-size: 15px; }
+  .bs-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .bs-tab { flex: 1; padding: 9px 4px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--muted); font-family: inherit; font-size: 13px; cursor: pointer; }
+  .bs-tab.active { background: var(--header, #16233F); color: #fff; border-color: var(--header, #16233F); font-weight: 700; }
+  .bs-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; }
+  .bs-nav button { padding: 7px 12px; border-radius: 9px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-family: inherit; font-size: 12.5px; cursor: pointer; }
+  .bs-nav button:disabled { opacity: 0.4; cursor: default; }
+  .bs-range { font-size: 13px; font-weight: 700; color: var(--text); text-align: center; flex: 1; }
+  .bs-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+  .bs-card { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 12px 6px; text-align: center; }
+  .bs-card .n { font-size: 19px; font-weight: 700; color: var(--text); }
+  .bs-card .l { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .bs-table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-bottom: 12px; }
+  .bs-table th { text-align: right; color: var(--muted); font-weight: 600; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+  .bs-table td { padding: 8px 4px; border-bottom: 1px solid var(--border); color: var(--text); }
+  .bs-sub { font-size: 12px; font-weight: 700; color: var(--text); margin: 14px 0 6px; }
+  .bs-note { font-size: 11.5px; color: var(--muted); line-height: 1.8; margin-top: 8px; }
+  .bs-auto { background: #FBEFD9; border: 1px solid #E9CE96; color: #8A6512; border-radius: 10px; padding: 10px 12px; font-size: 12px; line-height: 1.8; margin-top: 10px; }
   .bus-name-tooltip { background: var(--header, #16233F); color: #fff; border: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; box-shadow: none; }
   .bus-name-tooltip::before { display: none; }
+  .leaflet-control-attribution { direction: ltr; font-size: 10px; }
   .seen-line { font-size: 9.5px; font-weight: 500; }
   .seen-ok, .seen-wait { color: var(--muted, #8A8578); }
   .seen-late { color: #E67E22; font-weight: 700; }
@@ -2846,6 +2871,170 @@ function renderAdminBusLiveTab() {
 // ---------------------------------------------------------------------------
 // الخريطة الجماعية الحية — كل المشرفات النشطات بنفس الوقت، كل وحدة بلون واسم مختلف
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// إحصائيات الباصات (المدير والمالك): رحلات + كيلومترات + مدة، يومي / أسبوعي / شهري
+// ---------------------------------------------------------------------------
+let busStatsState = { period: "day", offset: 0, data: null, loading: false, error: "" };
+let busStatsReq = 0;
+
+function busFmtMin(m) {
+  m = Math.round(Number(m) || 0);
+  if (m < 60) return m + " د";
+  const h = Math.floor(m / 60), r = m % 60;
+  return r ? (h + " س " + r + " د") : (h + " س");
+}
+function busFmtKm(k) { return (Math.round((Number(k) || 0) * 10) / 10).toLocaleString("en-US") + " كم"; }
+
+function busStatsSet(period, offset) {
+  busStatsState = { period: period, offset: offset, data: null, loading: false, error: "" };
+  renderDashboard();
+}
+async function loadBusStats() {
+  const reqId = ++busStatsReq;
+  busStatsState.loading = true;
+  const period = busStatsState.period, offset = busStatsState.offset;
+  let data = null, error = "";
+  try {
+    const url = `${API_URL}?action=getBusStats&username=${encodeURIComponent(staffSession.username)}&password=${encodeURIComponent(staffSession._password)}&period=${period}&offset=${offset}`;
+    const res = await fetch(url);
+    data = await res.json();
+    if (!data.ok) { error = data.error || "تعذر جلب الإحصائيات"; data = null; }
+  } catch (err) { error = "تعذر الاتصال بالخادم"; }
+  if (reqId !== busStatsReq) return;              // المستخدم غيّر الفترة أثناء الجلب: تجاهل هالرد القديم
+  busStatsState.loading = false;
+  busStatsState.data = data;
+  busStatsState.error = error;
+  if (adminTab === "busStats") renderDashboard();
+}
+
+function renderAdminBusStatsTab() {
+  const s = busStatsState;
+  if (!s.data && !s.loading && !s.error) loadBusStats();
+
+  const tabs = [["day", "يومي"], ["week", "أسبوعي"], ["month", "شهري"]].map(([id, label]) =>
+    `<button type="button" class="bs-tab ${s.period === id ? "active" : ""}" onclick="busStatsSet('${id}', 0)">${label}</button>`).join("");
+
+  let body = "";
+  if (s.error) {
+    body = `<div class="empty-note" style="text-align:center;padding:24px 0;">${staffEsc(s.error)}<br><br><button type="button" class="btn-save" onclick="busStatsSet('${s.period}', ${s.offset})">إعادة المحاولة</button></div>`;
+  } else if (!s.data) {
+    body = `<div class="empty-note" style="text-align:center;padding:30px 0;color:var(--muted);">جارِ تحميل الإحصائيات...</div>`;
+  } else {
+    const d = s.data, t = d.totals;
+    const range = d.from === d.to ? d.from : `${d.from}  →  ${d.to}`;
+    const nav = `<div class="bs-nav">
+      <button type="button" onclick="busStatsSet('${s.period}', ${s.offset - 1})">السابق</button>
+      <div class="bs-range">${staffEsc(range)}</div>
+      <button type="button" onclick="busStatsSet('${s.period}', ${s.offset + 1})" ${s.offset >= 0 ? "disabled" : ""}>التالي</button>
+    </div>`;
+    const cards = `<div class="bs-cards">
+      <div class="bs-card"><div class="n">${t.trips}</div><div class="l">عدد الرحلات</div></div>
+      <div class="bs-card"><div class="n">${busFmtKm(t.km)}</div><div class="l">المسافة</div></div>
+      <div class="bs-card"><div class="n">${busFmtMin(t.minutes)}</div><div class="l">المدة</div></div>
+    </div>`;
+    const rows = d.rows.filter((r) => r.trips > 0 || r.autoTrips > 0);
+    const table = rows.length ? `
+      <div class="bs-sub">حسب المشرفة</div>
+      <table class="bs-table"><thead><tr><th>المشرفة</th><th>رحلات</th><th>المسافة</th><th>المدة</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr><td>${staffEsc(r.name)}</td><td>${r.trips}</td><td>${busFmtKm(r.km)}</td><td>${busFmtMin(r.minutes)}</td></tr>`).join("")}
+      </tbody></table>` : `<div class="empty-note" style="text-align:center;padding:18px 0;color:var(--muted);">لا يوجد رحلات بهالفترة</div>`;
+    const days = (s.period !== "day" && d.days.length) ? `
+      <div class="bs-sub">حسب اليوم</div>
+      <table class="bs-table"><thead><tr><th>اليوم</th><th>رحلات</th><th>المسافة</th><th>المدة</th></tr></thead><tbody>
+      ${d.days.map((x) => `<tr><td>${staffEsc(x.date)}</td><td>${x.trips}</td><td>${busFmtKm(x.km)}</td><td>${busFmtMin(x.minutes)}</td></tr>`).join("")}
+      </tbody></table>` : "";
+    const auto = t.autoTrips ? `<div class="bs-auto">⚠️ رحلات أُنهيت تلقائياً (منسية): <b>${t.autoTrips}</b> — ${busFmtKm(t.autoKm)} و${busFmtMin(t.autoMinutes)}.
+      أرقامها مضخّمة (تشمل الطريق للبيت) فما دخلت بالمجاميع أعلاه.</div>` : "";
+    const noDist = t.noDistanceTrips ? `<div class="bs-note">ملاحظة: ${t.noDistanceTrips} رحلة قبل تفعيل تسجيل المسافة، فمسافتها غير محسوبة.</div>` : "";
+    body = nav + cards + table + days + auto + noDist +
+      `<div class="bs-note">المسافة تقريبية (من نقاط المسار، بدقة ±5% وتنقص شوي عند المنعطفات). المجاميع لا تشمل الرحلات المنسية.</div>`;
+  }
+
+  return `<div class="form-card">
+    <div class="section-title">📈 إحصائيات الباصات</div>
+    <div class="bs-tabs">${tabs}</div>
+    ${body}
+  </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// أوقات وأيام الرحلات (المدير والمالك): خارجها السيرفر يرفض بدء الرحلة ونقاط الموقع، وأي رحلة منسية تُنهى تلقائياً
+// ---------------------------------------------------------------------------
+let tripHoursMsg = "";
+const TRIP_DAYS_AR = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+const TRIP_HOURS_DEFAULTS = { days: [0, 1, 2, 3, 4], open: "06:30", close: "17:00" };
+
+function readTripSchedule() {
+  const rawDays = getSettingValue("Trip_Days");
+  const days = /^[0-6](\s*,\s*[0-6])*$/.test(rawDays) ? Array.from(new Set(rawDays.split(",").map((x) => Number(x.trim())))).sort((a, b) => a - b) : null;
+  const okT = (v) => /^\d{1,2}:\d{2}$/.test(v);
+  const open = getSettingValue("Trip_Open"), close = getSettingValue("Trip_Close");
+  const timesOk = okT(open) && okT(close) && open.padStart(5, "0") < close.padStart(5, "0");
+  return {
+    days: days || TRIP_HOURS_DEFAULTS.days,
+    open: timesOk ? open.padStart(5, "0") : TRIP_HOURS_DEFAULTS.open,
+    close: timesOk ? close.padStart(5, "0") : TRIP_HOURS_DEFAULTS.close,
+    saved: !!(days && timesOk),
+  };
+}
+
+function renderAdminBusHoursTab() {
+  const sc = readTripSchedule();
+  const daysHtml = TRIP_DAYS_AR.map((name, i) =>
+    `<label class="th-day"><input type="checkbox" id="tripDay_${i}" ${sc.days.indexOf(i) !== -1 ? "checked" : ""} /><span>${name}</span></label>`).join("");
+  return `<div class="form-card">
+    <div class="section-title">⏰ أوقات وأيام الرحلات</div>
+    <div style="font-size:12.5px;color:var(--muted);line-height:1.9;">
+      خارج هذه الأيام والأوقات: السيرفر يرفض بدء أي رحلة وأي نقطة موقع، وأي رحلة منسية تُنهى تلقائياً عند وقت النهاية
+      (أو إذا سكتت أكثر من ساعة). بتوقيت دمشق.
+      ${sc.saved ? "" : "<br><b>القيم الحالية افتراضية</b> (لم تُحفظ بعد)."}
+    </div>
+    <div class="bs-sub">أيام الرحلات</div>
+    <div class="th-days">${daysHtml}</div>
+    <div class="bs-sub">الأوقات</div>
+    <div class="th-times">
+      <div><label for="tripOpen">بداية الرحلات</label><input type="time" id="tripOpen" value="${sc.open}" /></div>
+      <div><label for="tripClose">نهاية الرحلات</label><input type="time" id="tripClose" value="${sc.close}" /></div>
+    </div>
+    <button type="button" class="btn-save" id="saveTripHoursBtn" onclick="saveTripSchedule()">حفظ</button>
+    ${tripHoursMsg}
+    <div class="bs-note">تنبيه: إذا غيّرت وقت النهاية لوقت أبكر، أي رحلة جارية بعده تُنهى تلقائياً بأول فحص (كل 10 دقايق).
+    ولا تنسَ أن أيام العطل الرسمية المسجّلة بتقويم العطل لا تُمنع تلقائياً، فإن لزم أزل اليوم من هنا.</div>
+  </div>`;
+}
+
+async function saveTripSchedule() {
+  const days = TRIP_DAYS_AR.map((_, i) => i).filter((i) => document.getElementById("tripDay_" + i).checked);
+  const open = String(document.getElementById("tripOpen").value || "").slice(0, 5);
+  const close = String(document.getElementById("tripClose").value || "").slice(0, 5);
+  const fail = (m) => { tripHoursMsg = `<div class="form-msg err">${m}</div>`; renderDashboard(); };
+  if (!days.length) return fail("اختر يوماً واحداً على الأقل");
+  if (!/^\d{2}:\d{2}$/.test(open) || !/^\d{2}:\d{2}$/.test(close)) return fail("أدخل وقت البداية والنهاية");
+  if (open >= close) return fail("وقت البداية لازم يكون قبل وقت النهاية");
+  const btn = document.getElementById("saveTripHoursBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "جارِ الحفظ..."; }
+  try {
+    const res = await fetch(API_URL, { method: "POST", body: JSON.stringify({
+      action: "updateTripSchedule", adminUsername: staffSession.username, adminPassword: staffSession._password,
+      Days: days, Open: open, Close: close }) });
+    const data = await res.json();
+    if (data.ok) {
+      hapticSuccess();
+      if (!staffSession.settings) staffSession.settings = [];
+      [["Trip_Days", data.Days], ["Trip_Open", data.Open], ["Trip_Close", data.Close]].forEach(([k, v]) => {
+        const row = staffSession.settings.find((r) => r.Key === k);
+        if (row) row.Value = v; else staffSession.settings.push({ Key: k, Value: v });
+      });
+      tripHoursMsg = `<div class="form-msg ok">تم الحفظ ✓ — يسري فوراً</div>`;
+    } else {
+      tripHoursMsg = `<div class="form-msg err">${staffEsc(data.error || "تعذر الحفظ")}</div>`;
+    }
+  } catch (err) {
+    tripHoursMsg = `<div class="form-msg err">تعذر الاتصال بالخادم</div>`;
+  }
+  renderDashboard();
+}
+
 let fleetMapInstance = null;
 let fleetMarkers = {};       // Supervisor_ID -> L.marker
 let fleetDbRef = null;
@@ -2980,8 +3169,9 @@ function openFleetMap() {
     </div>`;
   document.body.appendChild(overlay);
 
-  fleetMapInstance = L.map("fleetMapEl", { zoomControl: true, attributionControl: false }).setView([35.3, 40.14], 11);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(fleetMapInstance);
+  fleetMapInstance = L.map("fleetMapEl", { zoomControl: true, attributionControl: true }).setView([35.3, 40.14], 11);
+  fleetMapInstance.attributionControl.setPrefix(false);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors' }).addTo(fleetMapInstance);
   fleetMarkers = {};
   fleetAutoFit = true;
   fleetMapInstance.on("dragstart", () => { fleetAutoFit = false; });
@@ -2991,6 +3181,7 @@ function openFleetMap() {
   fleetLoadTrails();   // لمّا المدير يحرّك الخريطة بإيده، نبطّل نسحبها
 
   // فرق التوقيت بين ساعة الجهاز وساعة Firebase — حتى لا يظهر "آخر ظهور" غلط لو ساعة الجوال مضبوطة غلط
+  try { firebase.database().goOnline(); } catch (e) { /* تجاهل */ }   // نفتح الاتصال فقط عند فتح الخريطة (خطة Spark المجانية: حد 100 اتصال متزامن)
   fleetOffsetRef = firebase.database().ref(".info/serverTimeOffset");
   fleetOffsetRef.on("value", (snap) => { fleetTimeOffset = snap.val() || 0; });
 
@@ -3074,6 +3265,7 @@ function closeFleetMap() {
   if (fleetDbRef) { fleetDbRef.off(); fleetDbRef = null; }
   if (fleetOffsetRef) { fleetOffsetRef.off(); fleetOffsetRef = null; }
   if (fleetSeenTimer) { clearInterval(fleetSeenTimer); fleetSeenTimer = null; }
+  try { firebase.database().goOffline(); } catch (e) { /* تجاهل */ }   // نقطع الاتصال عند إغلاق الخريطة حتى لا يبقى محسوباً من الـ100
   fleetTrips = {};
   fleetTrailLayer = null; fleetTrailLines = {}; fleetTrailPts = {}; fleetTrailReady = false;
   if (fleetMyLocWatchId !== null) { navigator.geolocation.clearWatch(fleetMyLocWatchId); fleetMyLocWatchId = null; }
@@ -4362,7 +4554,9 @@ const ADMIN_HIDEABLE_GROUPS = [
       { id: "absenceReport", label: "تقرير الغياب" } ] },
   { id: "staff", label: "🧑‍🏫 الطاقم", tabs: [
       { id: "teachers", label: "المعلمون" }, { id: "teacherAssign", label: "توزيع المواد" },
-      { id: "bus", label: "الباص" }, { id: "adminAccounts", label: "حسابات الإدارة" } ] },
+      { id: "bus", label: "الباص" }, { id: "busLive", label: "🗺️ تتبع مباشر" },
+      { id: "busStats", label: "📈 إحصائيات الباص" }, { id: "busHours", label: "⏰ أوقات الرحلات" },
+      { id: "adminAccounts", label: "حسابات الإدارة" } ] },
   { id: "school", label: "🏛️ المدرسة", tabs: [
       { id: "announcements", label: "الإعلانات" }, { id: "exams", label: "جداول الامتحانات" },
       { id: "holidays", label: "تقويم العطل" }, { id: "settings", label: "الإعدادات" } ] },
@@ -4375,11 +4569,16 @@ const TEACHER_HIDEABLE_TABS = [
   { id: "attendanceSearch", label: "سجل الحضور" }, { id: "behavior", label: "السلوك" },
   { id: "announcements", label: "الإعلانات" }, { id: "ranking", label: "الترتيب" },
 ];
+// تبويبات تطبيق المشرفة (Masar-supervisor.html) القابلة للإخفاء. «الرحلة» ثابتة دوماً لأنها أساس العمل.
+const SUPERVISOR_HIDEABLE_TABS = [
+  { id: "fleet", label: "🗺️ الباصات (خريطة كل الباصات)" }, { id: "students", label: "👦 طلابي" }, { id: "stats", label: "📊 إحصائياتي" },
+];
 // تبويبات بوابة الأهالي (index.html) القابلة للإخفاء. «الرئيسية» و«إعدادات العرض» ثابتتان دوماً وليستا هنا.
 const PARENT_HIDEABLE_TABS = [
   { id: "results", label: "النتائج" }, { id: "assignments", label: "الوظائف" }, { id: "attendance", label: "الحضور" },
   { id: "info", label: "بيانات الطالب (بالمزيد)" }, { id: "exams", label: "الامتحانات القادمة (بالمزيد)" },
   { id: "notes", label: "ملاحظات المعلمين (بالمزيد)" }, { id: "honor", label: "لوحة تكريم الأوائل (بالمزيد)" },
+  { id: "liveMap", label: "🚌 زر الخريطة الحية للباص (رابط خرائط غوغل القديم يبقى)" },
 ];
 
 function parseHiddenIds(settingKey) {
@@ -4400,6 +4599,7 @@ const PAGE_FEATURES_KINDS = {
   admin: { listSel: "#adminHideList input:checked", key: "Hidden_Admin_Tabs", btnId: "saveAdminHideBtn" },
   teacher: { listSel: "#teacherHideList input:checked", key: "Hidden_Teacher_Tabs", btnId: "saveTeacherHideBtn" },
   parent: { listSel: "#parentHideList input:checked", key: "Hidden_Parent_Tabs", btnId: "saveParentHideBtn" },
+  supervisor: { listSel: "#supervisorHideList input:checked", key: "Hidden_Supervisor_Tabs", btnId: "saveSupervisorHideBtn" },
 };
 async function submitPageFeatures(kind) {
   const cfg = PAGE_FEATURES_KINDS[kind];
@@ -4432,7 +4632,7 @@ function toggleHideGroupAll(groupBoxId, checked) {
 
 function renderPageFeaturesTab() {
   if (!isOwner()) return emptyState("🔒", "هذا القسم خاص بمطوّر الصفحة فقط", "");
-  const hiddenA = getHiddenAdminTabs(), hiddenT = getHiddenTeacherTabs(), hiddenP = parseHiddenIds("Hidden_Parent_Tabs");
+  const hiddenA = getHiddenAdminTabs(), hiddenT = getHiddenTeacherTabs(), hiddenP = parseHiddenIds("Hidden_Parent_Tabs"), hiddenS = parseHiddenIds("Hidden_Supervisor_Tabs");
 
   const adminHtml = ADMIN_HIDEABLE_GROUPS.map((g) => {
     const boxId = "hg_" + g.id;
@@ -4463,6 +4663,13 @@ function renderPageFeaturesTab() {
       `).join("")}
     </div>`;
 
+  const supervisorHtml = `
+    <div class="pf-group" id="hg_supervisor">
+      ${SUPERVISOR_HIDEABLE_TABS.map((t) => `
+        <label class="pf-item"><input type="checkbox" value="${t.id}" ${hiddenS.has(t.id) ? "checked" : ""} /><span>${t.label}</span></label>
+      `).join("")}
+    </div>`;
+
   return `
     <div class="form-card">
       <div class="section-title">⚙️ ميزات الصفحة</div>
@@ -4479,6 +4686,9 @@ function renderPageFeaturesTab() {
       <div class="pf-sec" style="margin-top:22px;">👪 قوائم الأهالي</div>
       <div id="parentHideList">${parentHtml}</div>
       <button type="button" class="btn-save" id="saveParentHideBtn" onclick="submitPageFeatures('parent')">حفظ قوائم الأهالي</button>
+      <div class="pf-sec" style="margin-top:22px;">🚌 قوائم المشرفات</div>
+      <div id="supervisorHideList">${supervisorHtml}</div>
+      <button type="button" class="btn-save" id="saveSupervisorHideBtn" onclick="submitPageFeatures('supervisor')">حفظ قوائم المشرفات</button>
       ${pageFeaturesMsg}
     </div>`;
 }
@@ -4586,6 +4796,8 @@ const ADMIN_GROUPS = [
       { id: "teacherAssign",    label: "توزيع المواد" },
       { id: "bus",              label: "الباص" },
       { id: "busLive",          label: "🗺️ تتبع مباشر" },
+      { id: "busStats",         label: "📈 إحصائيات الباص" },
+      { id: "busHours",         label: "⏰ أوقات الرحلات" },
       { id: "adminAccounts",    label: "👑 حسابات الإدارة" } ] },
   { id: "school",   label: "المدرسة",  tabs: [
       { id: "announcements",    label: "الإعلانات" },
@@ -4617,6 +4829,8 @@ const ADMIN_TAB_RENDERERS = {
   teacherAssign:    () => renderAdminTeacherAssignmentsTab(),
   bus:              () => renderAdminBusTab(),
   busLive:          () => renderAdminBusLiveTab(),
+  busStats:         () => renderAdminBusStatsTab(),
+  busHours:         () => renderAdminBusHoursTab(),
   announcements:    () => renderAdminAnnouncementsTab(),
   exams:            () => renderAdminExamsTab(),
   holidays:         () => renderAdminHolidaysTab(),
@@ -5386,7 +5600,7 @@ function renderAdminDashboardTab() {
     classCards += `${emptyState("🎓", "لا يوجد طلاب نشطون مسجّلون بعد", "")}`;
   }
 
-  const fleetShortcut = (supervisors.length > 0) ? `
+  const fleetShortcut = (supervisors.length > 0 && (isOwner() || !getHiddenAdminTabs().has("busLive"))) ? `
     <button type="button" class="form-card" onclick="openFleetMap()"
       style="display:flex;align-items:center;gap:12px;width:100%;text-align:right;border:none;cursor:pointer;background:var(--header,#16233F);color:#fff;margin-bottom:14px;">
       <div style="font-size:26px;">🗺️</div>

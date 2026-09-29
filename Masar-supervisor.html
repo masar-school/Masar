@@ -102,6 +102,7 @@
   .fleet-legend-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
   .bus-name-tooltip { background: var(--header); color: #fff; border: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; box-shadow: none; }
   .bus-name-tooltip::before { display: none; }
+  .leaflet-control-attribution { direction: ltr; font-size: 10px; }
   .seen-line { font-size: 9.5px; font-weight: 500; }
   .seen-ok, .seen-wait { color: var(--muted); }
   .seen-late { color: #E67E22; font-weight: 700; }
@@ -150,7 +151,8 @@ async function doLogin(username, password) {
     const res = await fetch(url);
     const data = await res.json();
     if (!data.ok) { loginError = data.error || "تعذر تسجيل الدخول"; busy = false; render(); return; }
-    session = { Supervisor_ID: data.Supervisor_ID, Supervisor_Name: data.Supervisor_Name, username, password, students: data.students || [] };
+    session = { Supervisor_ID: data.Supervisor_ID, Supervisor_Name: data.Supervisor_Name, username, password, students: data.students || [],
+      hidden: new Set(String(data.hiddenTabs || "").split(",").map((x) => x.trim()).filter(Boolean)) };   // ⚙️ ما أخفاه المالك عن المشرفات
     saveCreds(username, password);
     haptic();
     if (data.activeTrip) {
@@ -220,8 +222,13 @@ async function loadStats() {
 }
 
 // ---------- العرض ----------
+// تبويب أخفاه المالك من "ميزات الصفحة" (تجميلي بالواجهة). «الرحلة» ثابتة دوماً.
+function supTabHidden(id) { return id !== "trip" && !!(session && session.hidden && session.hidden.has(id)); }
+
 function render() {
+  if (session && supTabHidden(activeTab)) activeTab = "trip";   // لو التبويب المفتوح انخفى: ارجع للرحلة
   teardownFleetMap();   // الخريطة مرتبطة بعنصر HTML بينمسح عند إعادة الرسم
+  if (fleetOnline && (activeTab !== "fleet" || !session)) { try { firebase.database().goOffline(); } catch (e) { /* تجاهل */ } fleetOnline = false; }   // خرجنا من تبويب الخريطة: نقطع اتصال فايربيس
   const app = document.getElementById("app");
   if (!session) { app.innerHTML = renderLogin(); attachLoginEvents(); return; }
   app.innerHTML = renderMain();
@@ -268,15 +275,15 @@ function renderMain() {
     </div>
     <div class="content">
       ${activeTab === "trip" ? renderTripTab() : ""}
-      ${activeTab === "fleet" ? renderFleetTab() : ""}
-      ${activeTab === "students" ? renderStudentsTab() : ""}
-      ${activeTab === "stats" ? renderStatsTab() : ""}
+      ${activeTab === "fleet" && !supTabHidden("fleet") ? renderFleetTab() : ""}
+      ${activeTab === "students" && !supTabHidden("students") ? renderStudentsTab() : ""}
+      ${activeTab === "stats" && !supTabHidden("stats") ? renderStatsTab() : ""}
     </div>
     <div class="tabbar">
       <button class="tab-btn ${activeTab === "trip" ? "active" : ""}" data-tab="trip"><span class="ic">🚌</span>الرحلة</button>
-      <button class="tab-btn ${activeTab === "fleet" ? "active" : ""}" data-tab="fleet"><span class="ic">🗺️</span>الباصات</button>
-      <button class="tab-btn ${activeTab === "students" ? "active" : ""}" data-tab="students"><span class="ic">👦</span>طلابي</button>
-      <button class="tab-btn ${activeTab === "stats" ? "active" : ""}" data-tab="stats"><span class="ic">📊</span>إحصائياتي</button>
+      ${supTabHidden("fleet") ? "" : `<button class="tab-btn ${activeTab === "fleet" ? "active" : ""}" data-tab="fleet"><span class="ic">🗺️</span>الباصات</button>`}
+      ${supTabHidden("students") ? "" : `<button class="tab-btn ${activeTab === "students" ? "active" : ""}" data-tab="students"><span class="ic">👦</span>طلابي</button>`}
+      ${supTabHidden("stats") ? "" : `<button class="tab-btn ${activeTab === "stats" ? "active" : ""}" data-tab="stats"><span class="ic">📊</span>إحصائياتي</button>`}
     </div>
   `;
 }
@@ -386,6 +393,7 @@ function seenInfo(ts, offset) {
   return { text, level };
 }
 
+let fleetOnline = false;
 let fleetMap = null, fleetMarkers = {}, fleetTrips = {}, fleetDbRef = null, fleetOffsetRef = null;
 let fleetTimeOffset = 0, fleetSeenTimer = null, fleetAutoFit = true;
 let fleetTrailLayer = null, fleetTrailLines = {}, fleetTrailPts = {}, fleetTrailReady = false;
@@ -480,14 +488,17 @@ function renderFleetTab() {
 
 function initFleetMap() {
   if (!document.getElementById("fleetMapEl")) return;
-  fleetMap = L.map("fleetMapEl", { zoomControl: true, attributionControl: false }).setView([35.95, 39.01], 12);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(fleetMap);
+  fleetMap = L.map("fleetMapEl", { zoomControl: true, attributionControl: true }).setView([35.95, 39.01], 12);
+  fleetMap.attributionControl.setPrefix(false);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors' }).addTo(fleetMap);
   fleetMarkers = {}; fleetTrips = {}; fleetAutoFit = true;
   fleetMap.on("dragstart", () => { fleetAutoFit = false; });
   fleetTrailLayer = L.layerGroup(); fleetTrailLines = {}; fleetTrailPts = {}; fleetTrailReady = false;
   fleetApplyTrailVisibility();
   fleetLoadTrails();
 
+  try { firebase.database().goOnline(); } catch (e) { /* تجاهل */ }   // نفتح الاتصال فقط عند فتح تبويب الخريطة (خطة Spark المجانية: حد 100 اتصال متزامن)
+  fleetOnline = true;
   fleetOffsetRef = firebase.database().ref(".info/serverTimeOffset");
   fleetOffsetRef.on("value", (snap) => { fleetTimeOffset = snap.val() || 0; });
 

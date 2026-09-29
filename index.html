@@ -105,6 +105,7 @@
   .live-my-loc-btn { position: absolute; bottom: 14px; left: 14px; z-index: 1100; background: var(--card); border: 1px solid var(--border); border-radius: 50%; width: 42px; height: 42px; font-size: 18px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); cursor: pointer; }
   .bus-name-tooltip { background: var(--header); color: #fff; border: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; box-shadow: none; }
   .bus-name-tooltip::before { display: none; }
+  .leaflet-control-attribution { direction: ltr; font-size: 10px; }
   .live-map-status.seen-late { color: #E67E22; font-weight: 700; }
   .live-map-status.seen-lost { color: #D32F2F; font-weight: 700; }
 
@@ -1457,7 +1458,7 @@ function busRowHtml(c) {
   }
   // الخريطة الحية الجديدة (بجانب رابط خرائط غوغل القديم إن وُجد — الاثنان معاً)
   let liveBtn = "";
-  if (c.liveTrip && c.liveTrip.active && c.Supervisor_ID) {
+  if (c.liveTrip && c.liveTrip.active && c.Supervisor_ID && !getHiddenParentTabs().has("liveMap")) {   // المالك يقدر يخفيه من "ميزات الصفحة"
     liveBtn = `<button type="button" class="live-track-btn" onclick="event.stopPropagation(); openLiveMap('${esc(c.Supervisor_ID)}','${esc(name)}')"><span class="dot"></span> خريطة حية</button>`;
   }
   return `<div class="kid-bus"><span>🚌 مشرف الباص: <b>${name}</b></span><span style="display:flex;gap:6px;align-items:center;">${liveBtn}${action}</span></div>`;
@@ -1531,8 +1532,9 @@ function openLiveMap(supervisorId, supervisorName) {
     </div>`;
   document.body.appendChild(overlay);
 
-  liveMapInstance = L.map("liveMapEl", { zoomControl: true, attributionControl: false }).setView([0, 0], 15);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(liveMapInstance);
+  liveMapInstance = L.map("liveMapEl", { zoomControl: true, attributionControl: true }).setView([0, 0], 15);
+  liveMapInstance.attributionControl.setPrefix(false);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors' }).addTo(liveMapInstance);
   const color = busColorFor(supervisorId);
   const busIcon = L.divIcon({
     html: `<div style="width:30px;height:30px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:0 1px 4px rgba(0,0,0,0.4);">🚌</div>`,
@@ -1546,6 +1548,7 @@ function openLiveMap(supervisorId, supervisorName) {
 
   // مستمع لحظي — يتحدّث فوراً وقت وصول نبضة جديدة، بدون أي استعلام متكرر
   // فرق التوقيت بين ساعة الجهاز وساعة Firebase — حتى لا يظهر "آخر ظهور" غلط لو ساعة الجوال مضبوطة غلط
+  try { firebase.database().goOnline(); } catch (e) { /* تجاهل */ }   // نفتح الاتصال فقط عند فتح الخريطة (خطة Spark المجانية: حد 100 اتصال متزامن)
   liveMapOffsetRef = firebase.database().ref(".info/serverTimeOffset");
   liveMapOffsetRef.on("value", (snap) => { liveMapTimeOffset = snap.val() || 0; });
 
@@ -1613,6 +1616,7 @@ function closeLiveMap() {
   if (liveMapDbRef) { liveMapDbRef.off(); liveMapDbRef = null; }
   if (liveMapOffsetRef) { liveMapOffsetRef.off(); liveMapOffsetRef = null; }
   if (liveMapSeenTimer) { clearInterval(liveMapSeenTimer); liveMapSeenTimer = null; }
+  try { firebase.database().goOffline(); } catch (e) { /* تجاهل */ }   // نقطع الاتصال عند إغلاق الخريطة حتى لا يبقى محسوباً من الـ100
   liveMapTrip = null;
   if (liveMyLocWatchId !== null) { navigator.geolocation.clearWatch(liveMyLocWatchId); liveMyLocWatchId = null; }
   liveMyLocMarker = null;
