@@ -103,6 +103,20 @@
   .bus-name-tooltip { background: var(--header); color: #fff; border: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; box-shadow: none; }
   .bus-name-tooltip::before { display: none; }
   .leaflet-control-attribution { direction: ltr; font-size: 10px; }
+
+  .native-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 14px 16px; margin-bottom: 14px; }
+  .native-card-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .native-card-sub { font-size: 12px; color: var(--muted); line-height: 1.8; margin-bottom: 10px; }
+  .native-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 13px; color: var(--text); }
+  .native-btn { background: var(--header); color: #fff; border: none; border-radius: 9px; padding: 7px 12px; font-family: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
+  .native-line { border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; font-size: 12.5px; line-height: 1.8; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .native-line.ok { background: #E8F5E9; color: #2E7D32; }
+  .native-line.late { background: #FBEFD9; color: #8A6512; }
+  .native-line.warn { background: #FBE0DC; color: #8A2E1E; }
+  body.dark .native-line.ok { background: #1F3A24; color: #8FD19A; }
+  body.dark .native-line.late { background: #3A331C; color: #E9CE96; }
+  body.dark .native-line.warn { background: #3F2220; color: #F0A99F; }
+  .native-ready { font-size: 12px; color: var(--muted); text-align: center; margin-bottom: 12px; }
   .seen-line { font-size: 9.5px; font-weight: 500; }
   .seen-ok, .seen-wait { color: var(--muted); }
   .seen-late { color: #E67E22; font-weight: 700; }
@@ -142,6 +156,29 @@ function clearCreds() { try { localStorage.removeItem("masar_sup_u"); localStora
 
 function haptic() { try { navigator.vibrate && navigator.vibrate(30); } catch (e) {} }
 
+// ---------- تطبيق أندرويد الأصلي (جسر AndroidTracker) ----------
+// داخل تطبيق "مسار - المشرفة" توجد خدمة موقع أصلية ترسل الموقع بالخلفية بدون Traccar. الصفحة هي
+// اللي تبدأ الإرسال وتوقفه (مرتبطاً بحالة الرحلة بالسيرفر). بالمتصفح العادي ما فيه جسر، فكل شي يشتغل كالسابق.
+function hasNative() { return typeof window !== "undefined" && !!window.AndroidTracker; }
+function nativeStatus() { try { return JSON.parse(window.AndroidTracker.status()); } catch (e) { return null; } }
+function nativeStart() { try { return !!window.AndroidTracker.startTracking(API_URL, session.username, session.password); } catch (e) { return false; } }
+function nativeStop() { try { if (hasNative()) window.AndroidTracker.stopTracking(); } catch (e) {} }
+function nativeCall(name) { try { window.AndroidTracker[name](); } catch (e) {} }
+// يضمن أن الإرسال الأصلي يتبع حالة الرحلة الفعلية بالسيرفر (استئناف بعد إغلاق التطبيق، أو إيقاف بعد إنهاء تلقائي)
+function nativeSync(tripActive) {
+  if (!hasNative() || !session) return;
+  const st = nativeStatus();
+  if (tripActive) { if (!st || !st.tracking) nativeStart(); }
+  else if (st && st.tracking) nativeStop();
+}
+const NATIVE_STOP_REASONS = {
+  NO_TRIP: "السيرفر يقول ما في رحلة نشطة", OUT_OF_HOURS: "خارج أوقات الرحلات", AUTH: "تعذر التحقق من الحساب",
+  MAX_TIME: "انتهت المدة القصوى للإرسال", PERMISSION: "إذن الموقع غير مفعّل",
+  START_FAILED: "تعذر تشغيل خدمة الموقع",
+};
+// يستدعيها التطبيق عند الرجوع من شاشة الإعدادات أو بعد نتيجة طلب إذن
+if (typeof window !== "undefined") window.__nativeRefresh = () => { if (session && activeTab === "trip") render(); };
+
 // ---------- تسجيل الدخول ----------
 async function doLogin(username, password) {
   loginError = "";
@@ -161,6 +198,7 @@ async function doLogin(username, password) {
       if (tripTimerInterval) clearInterval(tripTimerInterval);
       tripTimerInterval = setInterval(() => { if (activeTab === "trip") render(); }, 1000);
     }
+    nativeSync(!!data.activeTrip);
   } catch (err) {
     loginError = "تعذر الاتصال بالخادم";
   }
@@ -168,6 +206,7 @@ async function doLogin(username, password) {
 }
 
 function doLogout() {
+  nativeStop();
   if (tripTimerInterval) { clearInterval(tripTimerInterval); tripTimerInterval = null; }
   clearCreds();
   session = null;
@@ -176,6 +215,15 @@ function doLogout() {
 
 // ---------- الرحلة ----------
 async function startTrip() {
+  if (hasNative()) {
+    // لازم إذن الموقع قبل ما نبدأ: وإلا الأهالي بيوصلهم "بدأت الرحلة" وما في موقع
+    const st = nativeStatus();
+    if (!st || !st.fine) {
+      nativeCall("requestLocation");
+      alert("لازم تسمحي بإذن الموقع أولاً، وبعدها اضغطي \"ابدأ الرحلة\" مرة ثانية.");
+      return;
+    }
+  }
   busy = true; render();
   try {
     const res = await fetch(API_URL, { method: "POST", body: JSON.stringify({ action: "startTrip", username: session.username, password: session.password }) });
@@ -183,6 +231,7 @@ async function startTrip() {
     if (!data.ok) { alert(data.error || "تعذر بدء الرحلة"); busy = false; render(); return; }
     tripStartTs = Date.now();
     haptic();
+    if (hasNative() && !nativeStart()) alert("بدأت الرحلة، لكن تعذر تشغيل إرسال الموقع. تأكدي من إذن الموقع، ثم اضغطي \"إعادة تشغيل الإرسال\".");
     if (tripTimerInterval) clearInterval(tripTimerInterval);
     tripTimerInterval = setInterval(() => { if (activeTab === "trip") render(); }, 1000);
   } catch (err) { alert("تعذر الاتصال بالخادم"); }
@@ -194,9 +243,16 @@ async function endTrip() {
   try {
     const res = await fetch(API_URL, { method: "POST", body: JSON.stringify({ action: "endTrip", username: session.username, password: session.password }) });
     const data = await res.json();
-    if (!data.ok) { alert(data.error || "تعذر إنهاء الرحلة"); busy = false; render(); return; }
+    // لو الرحلة انتهت أصلاً (مثلاً تلقائياً) ما في داعي نعلّق الشاشة: نعتبرها منتهية
+    const alreadyEnded = !data.ok && /لا توجد رحلة نشطة/.test(String(data.error || ""));
+    if (!data.ok && !alreadyEnded) { alert(data.error || "تعذر إنهاء الرحلة"); busy = false; render(); return; }
     haptic();
-  } catch (err) { alert("تعذر الاتصال بالخادم"); }
+  } catch (err) {
+    // فشل الاتصال: الرحلة لسا نشطة بالسيرفر، فنبقي الشاشة والإرسال كما هم
+    alert("تعذر الاتصال بالخادم. الرحلة لسا جارية — جرّبي مرة ثانية.");
+    busy = false; render(); return;
+  }
+  nativeStop();
   if (tripTimerInterval) { clearInterval(tripTimerInterval); tripTimerInterval = null; }
   tripStartTs = null;
   busy = false; render();
@@ -288,19 +344,60 @@ function renderMain() {
   `;
 }
 
+function renderNativePanel(active) {
+  const st = nativeStatus();
+  if (!st) return "";
+  let html = "";
+  if (active) {
+    if (st.tracking) {
+      const ago = st.lastOk ? Math.max(0, Math.round((Date.now() - st.lastOk) / 1000)) : null;
+      const late = ago !== null && ago > 90;
+      html += `<div class="native-line ${late ? "late" : "ok"}"><span>📡 الموقع يُرسل تلقائياً ${ago === null ? "— بانتظار أول إشارة GPS..." : "— آخر إرسال قبل " + ago + " ث"}${late ? " (تأخير: تأكدي من الإنترنت والـGPS)" : ""}</span></div>`;
+    } else {
+      const why = NATIVE_STOP_REASONS[st.stopReason] || "";
+      html += `<div class="native-line warn"><span>⚠️ إرسال الموقع متوقف${why ? " — " + why : ""}</span><button type="button" class="native-btn" data-native="__restart">إعادة تشغيل الإرسال</button></div>`;
+    }
+  }
+  const rows = [
+    { ok: st.fine, label: "إذن الموقع", action: "requestLocation", btn: "السماح" },
+    { ok: st.bg, label: "الموقع \"طوال الوقت\" (ليشتغل والشاشة مقفلة)", action: "requestBackground", btn: "فتح الإعدادات" },
+    { ok: st.notif, label: "الإشعارات", action: "requestNotifications", btn: "السماح" },
+    { ok: st.battery, label: "البطارية: بدون قيود", action: "ignoreBattery", btn: "السماح" },
+  ];
+  if (rows.some((r) => !r.ok)) {
+    html += `<div class="native-card">
+      <div class="native-card-title">إعداد التطبيق (مرة وحدة)</div>
+      <div class="native-card-sub">حتى يستمر إرسال الموقع والشاشة مقفلة أو وإنتِ فاتحة تطبيقات ثانية.
+        ${st.brand === "samsung" ? "وبسامسونج: الإعدادات ← البطارية ← حدود الاستخدام بالخلفية، وتأكدي إن التطبيق مو بالتطبيقات النائمة." : ""}
+        إذا Traccar مثبّت على نفس الجوال أوقفيه حتى ما تتكرر النقاط.</div>
+      ${rows.map((r) => `<div class="native-row"><span>${r.ok ? "✅" : "⚠️"} ${r.label}</span>${r.ok ? "" : `<button type="button" class="native-btn" data-native="${r.action}">${r.btn}</button>`}</div>`).join("")}
+    </div>`;
+  } else if (!active) {
+    html += `<div class="native-ready">✅ التطبيق جاهز لإرسال الموقع</div>`;
+  }
+  return html;
+}
+
 function renderTripTab() {
   const active = !!tripStartTs;
   const dur = active ? formatDuration(Date.now() - tripStartTs) : "00:00";
+  const native = hasNative();
+  const note = native
+    ? (active
+      ? `تم تفعيل الرحلة. تقدرين تقفلي الشاشة أو تفتحي تطبيقات ثانية، والإرسال مستمر. ارجعي لهالصفحة آخر الرحلة وضغطي "إنهاء الرحلة".`
+      : `اضغطي "ابدأ الرحلة" عند انطلاق الباص — رح توصل رسالة تلقائية لأولياء الأمور، وتظهر خريطة حية بتطبيقهم.`)
+    : (active
+      ? `تم تفعيل الرحلة — الموقع يُرسل بالخلفية من تطبيق Traccar على جوالك. تقدرين تسكّري هالصفحة الآن، وترجعي تفتحيها بس وقت انتهاء الرحلة.`
+      : `اضغطي "ابدأ الرحلة" عند انطلاق الباص (وتأكدي إن Traccar شغّال) — رح توصل رسالة تلقائية لأولياء الأمور، وتظهر خريطة حية بتطبيقهم.`);
   return `
+    ${native ? renderNativePanel(active) : ""}
     <div class="trip-card">
       <div class="trip-state">${active ? "الرحلة جارية الآن" : "لا توجد رحلة حالياً"}</div>
       <div class="trip-timer">${dur}</div>
       <button class="trip-btn ${active ? "end" : "start"}" id="tripBtn" ${busy ? "disabled" : ""}>
         ${busy ? "..." : (active ? "إنهاء الرحلة" : "ابدأ الرحلة")}
       </button>
-      ${active
-        ? `<div class="trip-note">تم تفعيل الرحلة — الموقع يُرسل تلقائياً من تطبيق GPSLogger بالخلفية. تقدرين تسكّري هالصفحة الآن، وترجعي تفتحيها بس وقت انتهاء الرحلة.</div>`
-        : `<div class="trip-note">اضغطي "ابدأ الرحلة" عند انطلاق الباص (وتأكدي إن GPSLogger شغّال) — رح توصل رسالة تلقائية لأولياء الأمور، وتظهر خريطة حية بتطبيقهم.</div>`}
+      <div class="trip-note">${note}</div>
     </div>
   `;
 }
@@ -350,7 +447,18 @@ function renderStatsTab() {
 
 function attachMainEvents() {
   const logoutBtn = document.getElementById("logoutBtn");
-  if (logoutBtn) logoutBtn.addEventListener("click", () => { if (confirm("تسجيل الخروج؟")) doLogout(); });
+  if (logoutBtn) logoutBtn.addEventListener("click", () => {
+    const msg = (hasNative() && tripStartTs) ? "الرحلة جارية، والخروج بيوقف إرسال الموقع. متأكدة؟" : "تسجيل الخروج؟";
+    if (confirm(msg)) doLogout();
+  });
+
+  document.querySelectorAll("[data-native]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const a = b.dataset.native;
+      if (a === "__restart") { if (!nativeStart()) alert("تعذر تشغيل الإرسال. تأكدي من إذن الموقع."); render(); }
+      else nativeCall(a);
+    });
+  });
 
   const tripBtn = document.getElementById("tripBtn");
   if (tripBtn) tripBtn.addEventListener("click", () => { tripStartTs ? endTrip() : startTrip(); });
