@@ -7,7 +7,7 @@
   "scope": "./index.html",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#FBF9F4",
+  "background_color": "#F4F6FA",
   "theme_color": "#16233F",
   "dir": "rtl",
   "lang": "ar",
