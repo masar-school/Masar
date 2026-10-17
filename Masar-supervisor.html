@@ -5,22 +5,27 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>مسار - تتبع الباص</title>
 <link rel="manifest" href="manifest-supervisor.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+Bhaijaan+2:wght@600;700&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<meta name="theme-color" content="#16233F">
+<meta name="theme-color" content="#17663A">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
   * { box-sizing: border-box; }
   :root {
-    --bg: #FBF9F4; --card: #fff; --border: #ECE9DE; --header: #16233F; --gold: #C79A3E;
-    --text: #2C2C2A; --muted: #8A8578; --muted2: #5B6472; --field-border: #E3E0D6;
+    --bg: #F4F6FA; --card: #fff; --border: #E3E7EF; --header: #17663A; --gold: #EDB005;
+    --text: #1F2633; --muted: #7C8494; --muted2: #586172; --field-border: #DCE1EA;
+    --live: #1E9A4A; --live-bg: #EAF6EE;
+    --display: "Baloo Bhaijaan 2", system-ui, Tahoma, sans-serif;
   }
   body.dark {
-    --bg: #12161F; --card: #1B2130; --border: #2A3142; --header: #0C1119; --gold: #D8B15C;
+    --bg: #12161F; --card: #1B2130; --border: #2A3142; --header: #0F3A22; --gold: #F5C53A; --live: #5CCB85; --live-bg: #16291E;
     --text: #EDEEF0; --muted: #9AA0AC; --muted2: #B4BAC6; --field-border: #2A3142;
   }
   html { overscroll-behavior-y: contain; }
@@ -29,7 +34,8 @@
 
   .login-header { background: var(--header); padding: 56px 24px 40px; text-align: center; border-bottom-left-radius: 28px; border-bottom-right-radius: 28px; }
   .school-name { color: #fff; font-size: 20px; font-weight: 700; }
-  .school-sub { color: #B9C2D4; font-size: 13px; margin-top: 6px; }
+  .school-sub { color: #C9E5D3; font-size: 13px; margin-top: 6px; }
+  .school-name, .header-name, .stat-big .num, .stat-box .n { font-family: var(--display); }
   form { padding: 32px 24px; flex: 1; }
   label { font-size: 13px; color: var(--muted2); display: block; margin-bottom: 6px; }
   .field { display: flex; align-items: center; background: var(--card); border: 1px solid var(--field-border); border-radius: 12px; padding: 12px 14px; margin-bottom: 16px; }
@@ -41,17 +47,20 @@
 
   .header { background: var(--header); padding: 16px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom-left-radius: 18px; border-bottom-right-radius: 18px; }
   .header-name { color: #fff; font-size: 16px; font-weight: 700; }
-  .header-sub { color: #B9C2D4; font-size: 12px; margin-top: 2px; }
+  .header-sub { color: #C9E5D3; font-size: 12px; margin-top: 2px; }
   .logout-btn { background: rgba(255,255,255,0.12); border: none; color: #fff; font-size: 12px; padding: 8px 12px; border-radius: 10px; cursor: pointer; }
 
   .content { flex: 1; overflow-y: auto; padding: 18px 18px 90px; color: var(--text); }
 
-  .trip-card { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 22px; text-align: center; margin-bottom: 16px; }
+  .trip-card { background: var(--card); border: 1px solid var(--border); border-radius: 22px; padding: 28px 22px 22px; text-align: center; margin-bottom: 16px; transition: background .3s, border-color .3s; }
+  .trip-card.live { background: var(--live-bg); border-color: var(--live); }
+  .trip-card.live .trip-state { color: var(--live); font-weight: 700; }
+  .live-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--live); margin-inline-end: 8px; vertical-align: 1px; animation: pd 1.4s infinite; }
+  @media (prefers-reduced-motion: reduce) { .live-dot, .ping-dot { animation: none; } .trip-card { transition: none; } }
   .trip-state { font-size: 14px; color: var(--muted2); margin-bottom: 4px; }
-  .trip-timer { font-size: 30px; font-weight: 700; color: var(--header); margin-bottom: 18px; }
-  body.dark .trip-timer { color: var(--gold); }
+  .trip-timer { font-family: var(--display); font-size: 68px; font-weight: 700; line-height: 1.15; color: var(--text); margin: 4px 0 20px; font-variant-numeric: tabular-nums; direction: ltr; }
   .trip-btn { width: 100%; border: none; border-radius: 14px; padding: 18px 0; font-size: 17px; font-weight: 700; cursor: pointer; color: #fff; }
-  .trip-btn.start { background: #2E7D32; }
+  .trip-btn.start { background: var(--live); }
   .trip-btn.end { background: #B4483A; }
   .trip-note { font-size: 12px; color: var(--muted); margin-top: 14px; line-height: 1.6; }
   .ping-status { font-size: 12.5px; color: var(--muted); margin-top: 10px; }
@@ -73,7 +82,7 @@
   .empty-note { text-align: center; color: var(--muted); font-size: 13px; padding: 30px 0; }
 
   .stat-big { background: var(--header); border-radius: 16px; padding: 18px; color: #fff; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; }
-  .stat-big .lbl { font-size: 13px; color: #B9C2D4; }
+  .stat-big .lbl { font-size: 13px; color: #C9E5D3; }
   .stat-big .num { font-size: 30px; font-weight: 700; }
   .stat-row { display: flex; gap: 10px; margin-bottom: 14px; }
   .stat-box { flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px; text-align: center; }
@@ -391,8 +400,8 @@ function renderTripTab() {
       : `اضغطي "ابدأ الرحلة" عند انطلاق الباص (وتأكدي إن Traccar شغّال) — رح توصل رسالة تلقائية لأولياء الأمور، وتظهر خريطة حية بتطبيقهم.`);
   return `
     ${native ? renderNativePanel(active) : ""}
-    <div class="trip-card">
-      <div class="trip-state">${active ? "الرحلة جارية الآن" : "لا توجد رحلة حالياً"}</div>
+    <div class="trip-card ${active ? "live" : ""}">
+      <div class="trip-state">${active ? `<span class="live-dot"></span>الرحلة جارية الآن` : "لا توجد رحلة حالياً"}</div>
       <div class="trip-timer">${dur}</div>
       <button class="trip-btn ${active ? "end" : "start"}" id="tripBtn" ${busy ? "disabled" : ""}>
         ${busy ? "..." : (active ? "إنهاء الرحلة" : "ابدأ الرحلة")}
